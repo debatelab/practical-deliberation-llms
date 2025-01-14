@@ -1,0 +1,17 @@
+[project]
+name = "practical-deliberation-llms"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Gregor Betz", email = "3662782+ggbetz@users.noreply.github.com" }
+]
+requires-python = ">=3.8"
+dependencies = []
+
+[project.scripts]
+practical-deliberation-llms = "practical_deliberation_llms:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
