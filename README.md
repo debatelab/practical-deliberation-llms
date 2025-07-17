@@ -1,4 +1,8 @@
-# Probing Practical Deliberation in LLMs — A Proof Of Concept
+<div align="center">
+<h1>
+Probing Practical Deliberation in LLMs<br/>—<br/>A Proof Of Concept
+</h1>
+</div>
 
 Authors: Gregor Betz ([gregor.betz@kit.edu](mailto:gregor.betz@kit.edu)), Christian Seidel ([christian.seidel@kit.edu](mailto:christian.seidel@kit.edu))
 
