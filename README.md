@@ -7,7 +7,7 @@ Authors: Gregor Betz ([gregor.betz@kit.edu](mailto:gregor.betz@kit.edu)), Christ
 
 In this repository, we're exploring how to probe the ability of large language models (LLMs) to engage in practical deliberation. In the [main notebook](notebooks/proof_of_concept.ipynb), we're testing whether an LLM's all-things-considered judgements in decision situations from the [`kellycyy/daily_dilemmas`](https://huggingface.co/datasets/kellycyy/daily_dilemmas) dataset are in fact insensitive to invariance transformations, such as strengthen the reasons in favor of the preferred options. 
 
-This is
+We conceive of this as
 
 1. 📐 a proof of concept, which is meant to demonstrate the feasibility of a more comprehensive computational investigation;   
 2. 🚧 work in progress, so feedback and contributions are welcome;
