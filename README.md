@@ -1,6 +1,6 @@
 <div align="center">
 <h1>
-Probing Practical Deliberation in LLMs<br/>—<br/>A Proof Of Concept
+Probing Practical Deliberation in LLMs<br/>—<br/>A Proof of Concept
 </h1>
 </div>
 
