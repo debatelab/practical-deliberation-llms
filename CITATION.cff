@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "Please cite this work as below."
+authors:
+  - family-names: Betz
+    given-names: Gregor
+    orcid: https://orcid.org/0000-0001-5802-5030
+  - family-names: Seidel
+    given-names: Christian
+    orcid: https://orcid.org/0000-0002-5866-9861
+title: "Probing Practical Deliberation in LLMs — A Proof Of Concept"
+version: 0.1.0
+url: https://github.com/debatelab/practical-deliberation-llms
