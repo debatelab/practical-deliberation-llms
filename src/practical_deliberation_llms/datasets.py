@@ -14,7 +14,7 @@ It provides:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import List
+from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
@@ -35,8 +35,19 @@ class DatasetAdapter(ABC):
     - `problem_uid`: str (optional but recommended)
     """
 
-    def __init__(self, dataset_name: str):
+    # Default configuration for this adapter instance. Subclasses should
+    # override this with adapter-specific defaults (e.g. HF config, split),
+    # and interpret the merged ``adapter_kwargs`` in ``load``.
+    DEFAULT_ADAPTER_KWARGS: Dict[str, Any] = {}
+
+    def __init__(self, dataset_name: str, **adapter_kwargs: Any):
         self.dataset_name = dataset_name
+
+        # Merge class-level defaults with user-provided overrides from YAML
+        # or other configuration sources.
+        merged: Dict[str, Any] = dict(self.DEFAULT_ADAPTER_KWARGS)
+        merged.update(adapter_kwargs or {})
+        self.adapter_kwargs = merged
 
     @abstractmethod
     def load(self) -> pd.DataFrame:
@@ -65,6 +76,18 @@ def make_problem_from_row(row: pd.Series) -> PracticalProblem:
     instance. These fields line up with the extended dataclass fields defined
     in `model.PracticalProblem`, but we use `setattr` to remain robust while
     the dataclass is being evolved.
+
+    Semantics of identifiers used in experiments
+    -------------------------------------------
+
+    - `problem_uid` identifies this *specific* problem instance as it appears
+      in an experiment run. For base problems this typically encodes the
+      dataset and source row (e.g. ``"daily_dilemmas::42"``).
+    - `base_problem_uid` (if present in `metadata`) points to the
+      *underlying original* dilemma from which a problem instance was
+      derived. For base problems this is often absent/``None``; for
+      transformed variants it is expected to equal the base problem's
+      `problem_uid` so that metrics can group variants with their baseline.
     """
 
     decision_situation = row["decision_situation"]
@@ -106,45 +129,96 @@ class DailyDilemmasAdapter(DatasetAdapter):
     """
 
     HF_DATASET_ID = "kellycyy/DailyDilemmas"
-    HF_CONFIG = "Dilemmas_with_values_aggregated"
+
+    # Default kwargs passed to ``datasets.load_dataset`` for this adapter.
+    # Callers may override these via ``adapter_kwargs`` in the experiment
+    # configuration.
+    DEFAULT_ADAPTER_KWARGS: Dict[str, Any] = {
+        "name": "Dilemmas_with_values_aggregated",
+        "split": "test",
+    }
 
     def load(self) -> pd.DataFrame:
-        ds = load_dataset(self.HF_DATASET_ID, self.HF_CONFIG, split="test")
+        """Load `DailyDilemmas` in its aggregated (long) layout.
+
+        The `Dilemmas_with_values_aggregated` configuration provides multiple
+        rows per dilemma index (`dilemma_idx`). This adapter groups rows by
+        `dilemma_idx`, selects a representative dilemma description, and
+        collapses the available actions into exactly two options per dilemma.
+        """
+
+        ds = load_dataset(self.HF_DATASET_ID, **self.adapter_kwargs)
         df = ds.to_pandas()
 
-        # Assumptions about column names; adjust if needed after inspecting
-        # the dataset in a notebook:
-        # - "dilemma" is the situation text
-        # - "action_1" / "action_2" are the two options
-        # - "dilemma_id" or "id" is the unique identifier
-        decision_col_candidates = ["dilemma", "dilemma_text", "scenario"]
-        action1_candidates = ["action_1", "action1", "option_1"]
-        action2_candidates = ["action_2", "action2", "option_2"]
-        id_candidates = ["dilemma_id", "id", "index"]
-
-        def pick_first(cols, candidates):
-            for c in candidates:
-                if c in cols:
-                    return c
-            raise KeyError(f"None of {candidates} found in dataset columns {cols}")
-
         cols = list(df.columns)
-        decision_col = pick_first(cols, decision_col_candidates)
-        action1_col = pick_first(cols, action1_candidates)
-        action2_col = pick_first(cols, action2_candidates)
-        id_col = pick_first(cols, id_candidates)
+
+        # Expected columns (as of writing):
+        #   ['idx', 'dilemma_idx', 'basic_situation', 'dilemma_situation',
+        #    'action_type', 'action', 'negative_consequence',
+        #    'values_aggregated', 'topic', 'topic_group']
+
+        if "dilemma_idx" not in cols:
+            raise KeyError(
+                f"Expected 'dilemma_idx' in DailyDilemmas columns, got {cols}"
+            )
+
+        # Prefer the more detailed dilemma_situation text if present.
+        if "dilemma_situation" in cols:
+            situation_col = "dilemma_situation"
+        elif "basic_situation" in cols:
+            situation_col = "basic_situation"
+        else:
+            raise KeyError(
+                "None of ['dilemma_situation', 'basic_situation'] found in "
+                f"dataset columns {cols}"
+            )
+
+        if "action" not in cols:
+            raise KeyError(f"Expected 'action' column in DailyDilemmas, got {cols}")
 
         records = []
-        for _, row in df.iterrows():
-            decision_situation = str(row[decision_col])
-            actions = [str(row[action1_col]), str(row[action2_col])]
-            source_id = row[id_col]
+        # Group rows by dilemma index; each group corresponds to a single
+        # decision situation with multiple candidate actions.
+        grouped = df.groupby("dilemma_idx", dropna=False)
+
+        for dilemma_idx, group in grouped:
+            # Use the first non-null situation text in the group.
+            situation_series = group[situation_col].dropna()
+            if situation_series.empty:
+                # Skip groups without any usable text.
+                continue
+            decision_situation = str(situation_series.iloc[0])
+
+            # Collect unique action texts in a stable order.
+            actions_raw = group["action"].astype(str).tolist()
+            seen = set()
+            actions: list[str] = []
+            for a in actions_raw:
+                if a not in seen:
+                    seen.add(a)
+                    actions.append(a)
+
+            # Require at least two actions to form a dilemma.
+            if len(actions) < 2:
+                continue
+
+            # For now, take the first two distinct actions. If the
+            # dataset evolves to include more than two per dilemma, we
+            # can revisit this and sample / rank them.
+            actions = actions[:2]
+
+            first = group.iloc[0]
+            source_id = first.get("dilemma_idx", dilemma_idx)
 
             metadata = {
-                "source_dataset": "daily_dilemmas",
+                "source_dataset": self.dataset_name,
                 "source_id": source_id,
                 "hf_dataset_id": self.HF_DATASET_ID,
-                "hf_config": self.HF_CONFIG,
+                "hf_config": self.adapter_kwargs.get("name"),
+                "hf_split": self.adapter_kwargs.get("split"),
+                "topic": first.get("topic"),
+                "topic_group": first.get("topic_group"),
+                "values_aggregated": first.get("values_aggregated"),
             }
 
             records.append(
@@ -187,7 +261,7 @@ class AIRiskDilemmasAdapter(DatasetAdapter):
         raise NotImplementedError("AIRiskDilemmasAdapter is not implemented yet.")
 
 
-ADAPTER_REGISTRY = {
+ADAPTER_REGISTRY: Dict[str, type[DatasetAdapter]] = {
     "daily_dilemmas": DailyDilemmasAdapter,
     "AITA": AITAAdapter,
     "RoleConflictBench": RoleConflictBenchAdapter,
@@ -196,7 +270,10 @@ ADAPTER_REGISTRY = {
 }
 
 
-def load_normalized_dataset(dataset_name: str) -> pd.DataFrame:
+def load_normalized_dataset(
+    dataset_name: str,
+    adapter_kwargs: Dict[str, Any] | None = None,
+) -> pd.DataFrame:
     """Load a dataset by name using the adapter registry.
 
     Returns a normalized DataFrame as defined by the corresponding adapter.
@@ -206,13 +283,16 @@ def load_normalized_dataset(dataset_name: str) -> pd.DataFrame:
         raise ValueError(f"Unknown dataset_name: {dataset_name}")
 
     adapter_cls = ADAPTER_REGISTRY[dataset_name]
-    adapter = adapter_cls(dataset_name=dataset_name)
+    adapter = adapter_cls(dataset_name=dataset_name, **(adapter_kwargs or {}))
     df = adapter.load()
     return df
 
 
 def sample_problems(
-    dataset_name: str, n_problems: int, seed: int
+    dataset_name: str,
+    n_problems: int,
+    seed: int,
+    adapter_kwargs: Dict[str, Any] | None = None,
 ) -> List[PracticalProblem]:
     """Sample a fixed-size subset of problems from the given dataset.
 
@@ -220,7 +300,7 @@ def sample_problems(
     instances via `make_problem_from_row`.
     """
 
-    df = load_normalized_dataset(dataset_name)
+    df = load_normalized_dataset(dataset_name, adapter_kwargs=adapter_kwargs or {})
     n_total = len(df)
     n = min(n_problems, n_total)
 

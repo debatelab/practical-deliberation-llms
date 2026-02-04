@@ -1,0 +1,17 @@
+candidate_model: "Qwen/Qwen2.5-3B-Instruct"
+assistant_model: "Qwen/Qwen2.5-3B-Instruct"
+
+datasets:
+  - name: "daily_dilemmas"
+    n_problems: 10
+    adapter_kwargs: {}
+
+n_traces_per_problem: 2
+temperature: 0.7
+top_p: 0.95
+seed: 1234
+
+max_transformations_per_problem: 1
+
+output_dir: "experiments/re_sampling_stability/outputs/results_with_transform"
+transform_problems_fn: "experiments.re_sampling_stability.transform.permutate_actions"

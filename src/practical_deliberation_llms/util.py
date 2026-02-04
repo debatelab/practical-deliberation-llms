@@ -1,40 +1,226 @@
-import numpy as np
-import copy
+"""Utility functions for logprob processing and disagreement metrics.
 
+This module collects small, model-agnostic helpers used across the
+project and in the Colab notebook, including:
+
+- Converting token-level logprobs into label-level probabilities.
+- Parsing `<think>...</think>` fences and JSON label answers.
+- Computing KL divergence and within-context disagreement metrics.
+
+Backward compatibility
+----------------------
+
+The function ``get_labelprobs_from_message`` is kept for compatibility
+with older LangChain-based notebooks. Its implementation is now a thin
+wrapper around the more general ``logprobs_to_label_probs`` helper.
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+import logging
+import re
+from typing import Any, Dict, Iterable, List, Tuple
+
+import numpy as np
 from langchain_core.messages import AIMessage
 
 
-def get_labelprobs_from_message(result_obj: AIMessage, labels=["a", "b"]):    
+logger = logging.getLogger(__name__)
+
+
+def logprobs_to_label_probs(
+    logprob_records: Iterable[Dict[str, Any]], labels: List[str]
+) -> Dict[str, float]:
+    """Convert token-level logprobs to a label→probability mapping.
+
+    Parameters
+    ----------
+    logprob_records:
+        Iterable of dicts with at least ``"token"`` and ``"logprob"`` keys,
+        as returned by vLLM/OpenAI-style ``top_logprobs``.
+    labels:
+        Candidate label strings (e.g. ``["a", "b"]``) that we want to
+        assign probabilities to.
+
+    Returns
+    -------
+    dict[str, float]
+        Mapping from label to (unnormalized) probability mass, where
+        probabilities are derived via a softmax over the provided
+        logprobs and then summed for tokens matching each label.
     """
-    Extracts label probabilities from the response of a language model.
 
-        Parameters
-        ----------
-        result_obj : AIMessage
-            The AIMessage object containing the response metadata with log probabilities.
-        labels : list of str, optional
-            A list of label strings to match against the tokens in the response. Default is ["a", "b"].
+    records = list(logprob_records)
+    if not records or not labels:
+        return {label: 0.0 for label in labels}
 
-        Returns
-        -------
-        dict
-            A dictionary where keys are labels and values are the summed probabilities of the tokens matching each label.
-    """
-    first_logprobs = copy.copy(result_obj.response_metadata["logprobs"]["content"][0]["top_logprobs"])
-    for record in first_logprobs:
-        matches = [l for l in labels if l in record["token"].lower()]
-        if len(matches) == 1:
-            record["label"] = matches[0]
-        else:
-            record["label"] = None
+    # Assign labels to records based on simple substring matching, in a
+    # way that mimics the original notebook logic.
+    for record in records:
+        token_text = str(record.get("token", "")).lower()
+        matches = [l for l in labels if l in token_text]
+        record["label"] = matches[0] if len(matches) == 1 else None
 
-    # logprobs to probs via softmax
-    logprobs = [record["logprob"] for record in first_logprobs]
-    probs = np.exp(logprobs) / np.exp(logprobs).sum()
-    for record, prob in zip(first_logprobs, probs):
-        record["prob"] = prob
-    label_probs = {
-        label: sum([record["prob"] for record in first_logprobs if record["label"] == label])
-        for label in labels
-    }
+    logprobs = np.array([float(rec["logprob"]) for rec in records], dtype=float)
+    # Numerically stable softmax.
+    max_lp = np.max(logprobs)
+    probs = np.exp(logprobs - max_lp)
+    probs = probs / probs.sum()
+
+    for rec, prob in zip(records, probs):
+        rec["prob"] = float(prob)
+
+    label_probs: Dict[str, float] = {label: 0.0 for label in labels}
+    for rec in records:
+        label = rec.get("label")
+        if label in label_probs:
+            label_probs[label] += float(rec["prob"])
+
     return label_probs
+
+
+def get_labelprobs_from_message(
+    result_obj: AIMessage, labels: List[str] | None = None
+) -> Dict[str, float]:
+    """Extract label probabilities from a LangChain ``AIMessage``.
+
+    This function preserves the public signature and high-level
+    behaviour used in earlier notebooks while delegating the core logic
+    to :func:`logprobs_to_label_probs`.
+    """
+
+    if labels is None:
+        labels = ["a", "b"]
+
+    first_logprobs = copy.copy(
+        result_obj.response_metadata["logprobs"]["content"][0]["top_logprobs"]
+    )
+    return logprobs_to_label_probs(first_logprobs, labels)
+
+
+THINK_REGEX = re.compile(r"<think>([\s\S]*?)</think>", re.IGNORECASE)
+LABEL_JSON_REGEX = re.compile(r"\{[\s\S]*?\"label\"[\s\S]*?\}")
+
+
+def parse_think_and_label(text: str) -> Tuple[str | None, str | None]:
+    """Extract `<think>...</think>` content and a JSON-like label snippet.
+
+    Returns a pair ``(think_text, label_json_str)``, where either element
+    may be ``None`` if parsing fails. When multiple matches are present,
+    the *last* occurrence is returned, which matches the notebook
+    behaviour of using the most recent answer.
+    """
+
+    think_matches = list(THINK_REGEX.finditer(text))
+    think_text: str | None
+    if think_matches:
+        think_text = think_matches[-1].group(1).strip()
+    else:
+        think_text = None
+
+    label_match = None
+    for match in LABEL_JSON_REGEX.finditer(text):
+        label_match = match
+
+    label_json: str | None
+    if label_match is not None:
+        label_json = label_match.group(0).strip()
+    else:
+        label_json = None
+
+    if think_text is None or label_json is None:
+        logger.debug(
+            "parse_think_and_label missing_parts think_missing=%s label_json_missing=%s",
+            think_text is None,
+            label_json is None,
+        )
+
+    return think_text, label_json
+
+
+def extract_label_from_json(json_str: str) -> str | None:
+    """Parse a label value from a JSON-like string.
+
+    The function tries ``json.loads`` first and falls back to a simple
+    regex that searches for a ``"label"`` field. On any failure, it
+    returns ``None`` instead of raising.
+    """
+
+    if not json_str:
+        logger.debug("extract_label_from_json empty_input")
+        return None
+
+    try:
+        obj = json.loads(json_str)
+        if isinstance(obj, dict) and "label" in obj:
+            val = obj["label"]
+            return str(val) if val is not None else None
+    except json.JSONDecodeError:
+        logger.debug("extract_label_from_json json_decode_error")
+
+    # Fallback: regex the label out of the string.
+    match = re.search(r"\"label\"\s*:\s*\"(.*?)\"", json_str)
+    if match:
+        return match.group(1)
+
+    logger.debug("extract_label_from_json regex_failed")
+    return None
+
+
+def kl_divergence(p: np.ndarray, q: np.ndarray, eps: float = 1e-12) -> float:
+    """Compute a numerically safe KL divergence ``KL(p || q)``.
+
+    Both ``p`` and ``q`` are interpreted as probability vectors; they are
+    normalized internally and clipped to ``[eps, 1]`` to avoid
+    ``log(0)``. The result is returned as a Python ``float``.
+    """
+
+    p = np.asarray(p, dtype=float)
+    q = np.asarray(q, dtype=float)
+
+    if p.ndim != 1 or q.ndim != 1 or p.shape != q.shape:
+        raise ValueError("p and q must be 1D arrays of the same shape")
+
+    # Normalize in case inputs are not perfectly normalized.
+    p_sum = p.sum()
+    q_sum = q.sum()
+    if p_sum > 0:
+        p = p / p_sum
+    if q_sum > 0:
+        q = q / q_sum
+
+    p = np.clip(p, eps, 1.0)
+    q = np.clip(q, eps, 1.0)
+
+    return float(np.sum(p * np.log(p / q)))
+
+
+def within_context_disagreement(dists: List[np.ndarray]) -> float:
+    """Compute within-context disagreement ``D_within`` over distributions.
+
+    The metric is defined as::
+
+        D_within = (1/n) * sum_i KL(Q_i || Q_bar)
+
+    where ``Q_i`` are the input distributions and ``Q_bar`` is their
+    mean distribution. This mirrors the definition used in the Colab
+    notebook and `PLAN_COLAB_NOTEBOOK.md`.
+    """
+
+    if not dists:
+        return 0.0
+
+    arr = np.stack([np.asarray(d, dtype=float) for d in dists], axis=0)
+    # Compute mean distribution and normalize for safety.
+    q_bar = arr.mean(axis=0)
+    if q_bar.sum() > 0:
+        q_bar = q_bar / q_bar.sum()
+
+    n = arr.shape[0]
+    total = 0.0
+    for i in range(n):
+        total += kl_divergence(arr[i], q_bar)
+
+    return float(total / n)

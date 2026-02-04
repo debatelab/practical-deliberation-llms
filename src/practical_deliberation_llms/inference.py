@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+import logging
 from openai import OpenAI
 
 from .util import (
@@ -22,6 +23,9 @@ from .util import (
     parse_think_and_label,
     extract_label_from_json,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class InferenceClient:
@@ -65,6 +69,14 @@ class InferenceClient:
             {"role": "user", "content": user_prompt},
         ]
 
+        logger.debug(
+            "generate_trace call model=%s temperature=%.3f top_p=%.3f seed=%s",
+            self.model,
+            temperature,
+            top_p,
+            seed,
+        )
+
         response = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
@@ -76,6 +88,20 @@ class InferenceClient:
         content = response.choices[0].message.content
         think_text, label_json_str = parse_think_and_label(content)
         label = extract_label_from_json(label_json_str) if label_json_str else None
+
+        if think_text is None or label_json_str is None or label is None:
+            logger.debug(
+                "generate_trace parse_issues think_missing=%s label_json_missing=%s label_missing=%s",
+                think_text is None,
+                label_json_str is None,
+                label is None,
+            )
+
+        logger.debug(
+            "generate_trace result think_len=%d content_len=%d",
+            len(think_text or ""),
+            len(content or ""),
+        )
 
         return {
             "raw_response": response,
@@ -95,6 +121,12 @@ class InferenceClient:
         label probabilities using `logprobs_to_label_probs`.
         """
 
+        logger.debug(
+            "score_label_given_trace call model=%s n_labels=%d",
+            self.model,
+            len(labels),
+        )
+
         response = self.client.completions.create(
             model=self.model,
             prompt=prompt,
@@ -113,7 +145,14 @@ class InferenceClient:
         try:
             logprob_records = logprobs_obj.top_logprobs[0]
         except AttributeError:  # pragma: no cover - defensive fallback
+            logger.warning(
+                "score_label_given_trace unexpected_logprobs_structure type=%s",
+                type(logprobs_obj),
+            )
             logprob_records = logprobs_obj[0] if isinstance(logprobs_obj, list) else []
 
         label_probs = logprobs_to_label_probs(logprob_records, labels)
+
+        logger.debug("score_label_given_trace label_probs=%s", label_probs)
+
         return label_probs
