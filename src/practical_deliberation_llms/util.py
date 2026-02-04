@@ -56,12 +56,27 @@ def logprobs_to_label_probs(
     if not records or not labels:
         return {label: 0.0 for label in labels}
 
-    # Assign labels to records based on simple substring matching, in a
-    # way that mimics the original notebook logic.
+    # Assign labels to records, preferring exact token matches (after
+    # stripping quotes and whitespace) and falling back to substring
+    # matching to remain robust across tokenizers.
+    lower_labels = [l.lower() for l in labels]
     for record in records:
-        token_text = str(record.get("token", "")).lower()
-        matches = [l for l in labels if l in token_text]
-        record["label"] = matches[0] if len(matches) == 1 else None
+        raw_token = str(record.get("token", ""))
+        token_stripped = raw_token.strip().strip('"').lower()
+
+        # First pass: exact match against labels.
+        exact_matches = [l for l in lower_labels if token_stripped == l]
+        if len(exact_matches) == 1:
+            record["label"] = labels[lower_labels.index(exact_matches[0])]
+            continue
+
+        # Second pass: substring match, mirroring original logic.
+        token_lower = raw_token.lower()
+        substring_matches = [l for l in lower_labels if l in token_lower]
+        if len(substring_matches) == 1:
+            record["label"] = labels[lower_labels.index(substring_matches[0])]
+        else:
+            record["label"] = None
 
     logprobs = np.array([float(rec["logprob"]) for rec in records], dtype=float)
     # Numerically stable softmax.

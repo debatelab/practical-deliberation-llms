@@ -36,32 +36,10 @@ import logging
 from jinja2 import Template
 
 from practical_deliberation_llms.inference import InferenceClient
+from .reasoning import SYSTEM_PROMPT_TEMPLATE, USER_PROMPT_TEMPLATE
 
 
 logger = logging.getLogger(__name__)
-
-
-SCORE_PROMPT_TEMPLATE = Template(
-    """You will evaluate how well each labeled option fits the reasoning
-below about a practical dilemma. Your job is *not* to generate new
-reasoning but to interpret the existing reasoning and decide which
-option it most strongly supports.
-
-Decision situation:
-{{ decision_situation }}
-
-Available actions:
-{% for label, action in labeled_actions %}
-- {{ label }}) {{ action }}
-{% endfor %}
-
-Reasoning (provided):
-{{ think or "<no_think_block>" }}
-
-Based only on this reasoning, output a single token corresponding to the
-best-supported option label (one of: {{ labels|join(", ") }}).
-"""
-)
 
 
 async def score_choice_labels_for_trace(
@@ -106,31 +84,44 @@ async def score_choice_labels_for_trace(
         len(actions),
     )
 
-    prompt = SCORE_PROMPT_TEMPLATE.render(
+    if not think:
+        logger.warning(
+            "score_trace skip_missing_think problem_uid=%s trace_id=%s",
+            problem_uid,
+            trace_id,
+        )
+        return []
+
+    system_prompt = SYSTEM_PROMPT_TEMPLATE.render(labels=label_letters)
+    user_prompt = USER_PROMPT_TEMPLATE.render(
         decision_situation=decision_situation,
         labeled_actions=labeled_actions,
-        think=think,
+    )
+
+    context_messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    label_probs = inference_client.score_label_given_trace(
+        context_messages=context_messages,
+        reasoning=think,
         labels=label_letters,
     )
 
-    label_probs = inference_client.score_label_given_trace(
-        prompt=prompt, labels=label_letters
-    )
-
-    # Ensure we have a proper probability distribution; fall back to
-    # uniform if the model failed to assign any mass to the candidate
-    # labels.
+    # Ensure we have a proper probability distribution; if the model
+    # failed to assign any mass to the candidate labels, log a warning
+    # and skip this trace instead of fabricating a uniform distribution.
     probs = [float(label_probs.get(label, 0.0)) for label in label_letters]
     total = sum(probs)
     if total <= 0.0:
-        if label_letters:
-            logger.warning(
-                "score_trace uniform_fallback_zero_mass problem_uid=%s trace_id=%s labels=%s",
-                problem_uid,
-                trace_id,
-                label_letters,
-            )
-        probs = [1.0 / len(label_letters)] * len(label_letters) if label_letters else []
+        logger.warning(
+            "score_trace zero_mass_skip_trace problem_uid=%s trace_id=%s labels=%s",
+            problem_uid,
+            trace_id,
+            label_letters,
+        )
+        return []
     else:
         probs = [p / total for p in probs]
 

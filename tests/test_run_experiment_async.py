@@ -22,9 +22,15 @@ class DummyInferenceClient:
         return {"think": "", "label_json": '{"label": "a"}', "label": "a"}
 
     def score_label_given_trace(
-        self, prompt: str, labels: List[str]
+        self, context_messages: List[Dict[str, Any]], reasoning: str, labels: List[str]
     ) -> Dict[str, float]:  # pragma: no cover - not used
-        self.calls_score.append({"prompt": prompt, "labels": labels})
+        self.calls_score.append(
+            {
+                "context_messages": context_messages,
+                "reasoning": reasoning,
+                "labels": labels,
+            }
+        )
         return {label: 1.0 / len(labels) for label in labels}
 
 

@@ -2,73 +2,56 @@
 
 This script wires together the high-level workflow:
 
-    1. Parse CLI arguments into an experiment configuration.
-    2. Initialize an OpenAI-compatible client and the InferenceClient wrapper.
-    3. Load decision problems from a configured dataset.
-    4. Apply a *pluggable* async transformation function to each problem.
-    5. Apply a *pluggable* async reasoning generation function to each
+    1. Parse an :class:`ExperimentConfig` from the command line via
+       :func:`chz.nested_entrypoint`.
+    2. If ``config_yaml`` is provided, load a YAML configuration and merge
+       it with CLI values (CLI taking precedence) to obtain the final
+       :class:`ExperimentConfig`.
+    3. Initialize an OpenAI-compatible client and the InferenceClient wrapper.
+    4. Load decision problems from a configured dataset.
+    5. Apply a *pluggable* async transformation function to each problem.
+    6. Apply a *pluggable* async reasoning generation function to each
        (possibly transformed) problem to obtain reasoning traces.
-    6. Apply a *pluggable* async scoring function to each reasoning trace to
+    7. Apply a *pluggable* async scoring function to each reasoning trace to
        obtain label probabilities.
-    7. Convert the accumulated Python data structures into DataFrames and
+    8. Convert the accumulated Python data structures into DataFrames and
        hand them off to fixed analysis / plotting / persistence helpers.
 
-The goal is to keep this file responsible for overall orchestration and
-dataset plumbing (mapping async callables over collections), while keeping
-the "scientific" logic in separate, testable modules that can be swapped via
-CLI arguments.
+Usage examples (chz CLI)
+------------------------
 
-All *pluggable* functions are expected to be async callables. The main
-entrypoint is therefore also async and is wrapped via asyncio.run(...).
+Run with a YAML configuration file::
 
-NOTE: The first draft deliberately avoids over-engineering around custom
-row/data structures. We work with plain Python dicts and lists here and
-can introduce lightweight dataclasses later once the interfaces stabilize.
+    python -m experiments.re_sampling_stability.run_experiment \
+        config_yaml=experiments/re_sampling_stability/configs/minimal.yaml
 
-Usage examples
---------------
+Override a single field from the YAML via CLI (CLI wins for that field)::
 
-Run with default settings (uses CLI defaults only)::
-
-    uv run python -m experiments.re_sampling_stability.run_experiment
-
-Run with a YAML configuration file (YAML overrides CLI defaults)::
-
-    uv run python -m experiments.re_sampling_stability.run_experiment \
-        --config-yaml experiments/re_sampling_stability/configs/minimal.yaml
-
-Override a single field from the YAML via CLI (YAML still wins for
-other fields)::
-
-    uv run python -m experiments.re_sampling_stability.run_experiment \
-        --config-yaml experiments/re_sampling_stability/configs/minimal.yaml \
-        --candidate-model Qwen/Qwen2.5-7B-Instruct
+    python -m experiments.re_sampling_stability.run_experiment \
+        config_yaml=experiments/re_sampling_stability/configs/minimal.yaml \
+        candidate_model=Qwen/Qwen2.5-7B-Instruct
 
 Specify custom pluggable functions for transform / reasoning / scoring::
 
-    uv run python -m experiments.re_sampling_stability.run_experiment \
-        --transform-problems-fn \
-          experiments.re_sampling_stability.transform.transform_problems \
-        --generate-reasoning-trace-fn \
+    python -m experiments.re_sampling_stability.run_experiment \
+        config_yaml=experiments/re_sampling_stability/configs/with_transform.yaml \
+        generate_reasoning_trace_fn=\
           experiments.re_sampling_stability.reasoning.generate_reasoning_traces_for_problem \
-        --score-choice-labels-fn \
+        score_choice_labels_fn=\
           experiments.re_sampling_stability.judgment.score_choice_labels_for_trace
 """
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import importlib
 import logging
 import os
-from dataclasses import asdict
 from typing import Any, Awaitable, Callable, List, Optional, Sequence
 
 import chz
 import numpy as np
 import pandas as pd
-
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -77,9 +60,7 @@ from practical_deliberation_llms.inference import InferenceClient
 from practical_deliberation_llms.io import save_results
 from practical_deliberation_llms.plotting import plot_results
 
-from .chz_config import LauncherConfig
-from .config import ExperimentConfig, build_config, build_config_from_launcher
-
+from .config import CLIConfig, ExperimentConfig, build_config_from_cli
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +190,7 @@ async def run_experiment_async(
     `asyncio.gather` on batches), this is the place to do it.
     """
 
-    logger.info("Experiment configuration: %s", asdict(config))
+    logger.info("Experiment configuration: %s", chz.asdict(config))
 
     # Initialize client and wrapper. We load a .env file (if present) so
     # that OPENAI_BASE_URL and OPENAI_API_KEY can be configured without
@@ -420,209 +401,19 @@ async def run_experiment_async(
     )
 
 
-# ---------------------------------------------------------------------------
-# CLI parsing and entry point
-# ---------------------------------------------------------------------------
-
-
-def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    """Parse CLI arguments for the experiment script.
-
-    Parameters
-    ----------
-    argv:
-        Optional sequence of argument strings. If omitted, `sys.argv[1:]`
-        is used implicitly by `argparse`.
-    """
-
-    parser = argparse.ArgumentParser(
-        description=(
-            "Run judgment stability / re-sampling experiment with pluggable "
-            "transform, reasoning, and scoring functions."
-        )
-    )
-
-    # Optional YAML configuration
-    parser.add_argument(
-        "--config-yaml",
-        type=str,
-        default=None,
-        help=(
-            "Path to a YAML file with experiment configuration. "
-            "Values from the YAML file override the corresponding CLI "
-            "options for ExperimentConfig fields."
-        ),
-    )
-
-    # Model and API settings
-    parser.add_argument(
-        "--candidate-model",
-        type=str,
-        default="Qwen/Qwen2.5-3B-Instruct",
-        help="Name of the model under test (served via OpenAI-compatible API)",
-    )
-    parser.add_argument(
-        "--assistant-model",
-        type=str,
-        default="Qwen/Qwen2.5-3B-Instruct",
-        help="Name of the assistant / transformation model (currently unused in this draft)",
-    )
-    parser.add_argument(
-        "--openai-base-url",
-        type=str,
-        default=None,
-        help=(
-            "Optional override for OPENAI_BASE_URL. If omitted, the "
-            "OpenAI client will use environment variables (which can be "
-            "populated from a .env file)."
-        ),
-    )
-    parser.add_argument(
-        "--api-token",
-        type=str,
-        default=None,
-        help=(
-            "Optional override for OPENAI_API_KEY. If omitted, the "
-            "OpenAI client will use environment variables (which can be "
-            "populated from a .env file)."
-        ),
-    )
-
-    # Dataset and sampling. Dataset selection and adapter configuration are
-    # provided via the YAML config file; the CLI only exposes the global
-    # random seed here.
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=1234,
-        help="Random seed for sampling and other RNG-based steps",
-    )
-
-    # Generation parameters
-    parser.add_argument(
-        "--n-traces-per-problem",
-        type=int,
-        default=4,
-        help="Number of reasoning traces to generate per problem",
-    )
-    parser.add_argument(
-        "--temperature",
-        type=float,
-        default=0.7,
-        help="Sampling temperature for trace generation",
-    )
-    parser.add_argument(
-        "--top-p",
-        type=float,
-        default=0.95,
-        help="Top-p nucleus sampling parameter for trace generation",
-    )
-
-    # Transformations
-    parser.add_argument(
-        "--max-transformations-per-problem",
-        type=int,
-        default=2,
-        help=(
-            "Upper bound on the number of transformed variants per problem. "
-            "Exact semantics are up to the transform function."
-        ),
-    )
-
-    # Analysis / IO
-    parser.add_argument(
-        "--output-dir",
-        type=str,
-        default="experiments/re_sampling_stability/results",
-        help="Directory where results (and later plots) will be stored",
-    )
-    parser.add_argument(
-        "--no-plots",
-        action="store_true",
-        help="Disable generation of plots (once implemented)",
-    )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Enable verbose (DEBUG-level) logging output",
-    )
-
-    # Pluggable async functions (dotted paths)
-    parser.add_argument(
-        "--transform-problems-fn",
-        type=str,
-        default=None,
-        help=(
-            "Optional dotted path to async function transforming a single "
-            "problem. If omitted, no transformations are applied. "
-            "Signature: (config, problem) -> awaitable[sequence[problem]]."
-        ),
-    )
-    parser.add_argument(
-        "--generate-reasoning-trace-fn",
-        type=str,
-        default="experiments.re_sampling_stability.reasoning.generate_reasoning_traces_for_problem",
-        help=(
-            "Dotted path to async function generating traces for a problem. "
-            "Signature: (config, inference_client, problem) -> awaitable[sequence[dict]]."
-        ),
-    )
-    parser.add_argument(
-        "--score-choice-labels-fn",
-        type=str,
-        default="experiments.re_sampling_stability.judgment.score_choice_labels_for_trace",
-        help=(
-            "Dotted path to async function scoring labels for a trace. "
-            "Signature: (config, inference_client, trace_dict) -> awaitable[sequence[dict]]."
-        ),
-    )
-
-    return parser.parse_args(argv)
-
-
-def main(argv: Sequence[str] | None = None) -> None:
-    """CLI entry point.
-
-    This function parses arguments, sets up logging and seeds, resolves
-    the pluggable async functions, builds the experiment configuration,
-    and finally runs the async experiment via `asyncio.run`.
-    """
-
-    args = parse_args(argv)
-    setup_logging(verbose=args.verbose)
-    set_global_seeds(args.seed)
-
-    # Resolve pluggable async functions from dotted paths.
-    transform_problems_fn = None
-    if args.transform_problems_fn:
-        transform_problems_fn = resolve_callable(args.transform_problems_fn)
-    generate_reasoning_trace_fn = resolve_callable(args.generate_reasoning_trace_fn)
-    score_choice_labels_fn = resolve_callable(args.score_choice_labels_fn)
-
-    config = build_config(args)
-
-    asyncio.run(
-        run_experiment_async(
-            config=config,
-            transform_problems_fn=transform_problems_fn,
-            generate_reasoning_trace_fn=generate_reasoning_trace_fn,
-            score_choice_labels_fn=score_choice_labels_fn,
-        )
-    )
-
-
-def main_chz(launcher: LauncherConfig) -> None:
+def main_chz(cli_cfg: CLIConfig) -> None:
     """CLI entry point powered by :mod:`chz`.
 
-    This variant parses a :class:`LauncherConfig` from the command line
-    using :func:`chz.nested_entrypoint`, combines YAML configuration with
-    CLI overrides via :mod:`chz`'s :class:`~chz.Blueprint`, and then runs
+    ``cli_cfg`` is parsed from the command line via
+    :func:`chz.nested_entrypoint`. The referenced YAML configuration is
+    loaded and combined with any non-``None`` CLI overrides to obtain the
+    final :class:`ExperimentConfig` passed to
     :func:`run_experiment_async`.
     """
 
-    setup_logging(verbose=False)
+    setup_logging(verbose=True)
 
-    config = build_config_from_launcher(launcher)
+    config = build_config_from_cli(cli_cfg)
 
     # Seed RNGs based on the final configuration so that YAML / override
     # changes always affect the experiment deterministically.
@@ -646,7 +437,8 @@ def main_chz(launcher: LauncherConfig) -> None:
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entry point
-    # NOTE: The :mod:`chz`-powered entrypoint is the default when running
-    # this module as a script. Legacy consumers that rely on the
-    # argparse-based CLI should continue to call :func:`main` directly.
+    # NOTE: This module is intended to be invoked via
+    #   `python -m experiments.re_sampling_stability.run_experiment`
+    # so that :mod:`chz` can parse a :class:`CLIConfig` from the command
+    # line and run the experiment.
     chz.nested_entrypoint(main_chz)

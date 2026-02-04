@@ -1,304 +1,303 @@
-**1) Settle Experiment Package Layout**
+**Phase 0 – Clarify Target Behavior**
 
-- [+] Create a real Python package for the experiment code:
-  - e.g. `experiments/re_sampling_stability` (underscore),
-- [+] Add empty files (stubs) in `experiments/re_sampling_stability`:
-  - `transform.py`
-  - `reasoning.py`
-  - `judgment.py` 
-- [+]Make sure the dotted paths used in the CLI defaults:
-  - `experiments.re_sampling_stability.transform.transform_problems`
-  - `experiments.re_sampling_stability.reasoning.generate_reasoning_traces_for_problem`
-  - `experiments.re_sampling_stability.judgment.score_choice_labels_for_trace`
-  actually resolve.
-- Note: For now, experiment packages are intended primarily for CLI use;
-  they are importable as namespace packages when the repo is on the
-  Python path, but there is no additional support for notebook imports.
-
-
-**2) Implement The Three Async Pluggable Functions**
-
-- [+] `transform.transform_problems(config, problem) -> list[problem]`:
-  - Default behavior: include base problem;
-  - implement a basic `reverse_options` variant (respect `config.max_transformations_per_problem`).
-  - Attach transformation metadata as in the notebook (`base_problem_uid`, `transformation_type`, etc.).
-  - Watch out: preserve or deterministically create `problem_uid`s for variants.
-- [+] `reasoning.generate_reasoning_traces_for_problem(config, inference_client, problem) -> list[dict]`:
-  - Mirror notebook step 7; use Jinja prompts; call `InferenceClient.generate_trace`.
-  - Return dicts with a stable set of keys (`problem_uid`, `trace_id`, `decision_situation`, `actions`, `labels`, `think`, etc.).
-  - Watch out: consistent seeding strategy and `trace_id` handling; avoid leaking pandas/HF details in here.
-- [+] `judgment.score_choice_labels_for_trace(config, inference_client, trace) -> list[dict]`:
-  - Mirror notebook step 8; reconstruct prompt with reasoning; call `InferenceClient.score_label_given_trace`.
-  - Return one dict per label with (`problem_uid`, `trace_id`, `label`, `prob`, plus transformation metadata).
-  - Watch out: ensure probabilities are normalized and handle degenerate cases (all-zero probabilities → uniform).
-
-**3) Define Minimal Trace/Score “Schemas”**
-
-- [+] Even without dataclasses, write down in docstrings/comments the expected keys for:
-  - trace dicts (output of reasoning function),
-  - score dicts (output of scoring function).
-- [+] Make `run_experiment.py` comments explicit about what `compute_metrics` and `save_results` will expect later.
-- [+] Keep these signatures loose until metrics/plots stabilize. Consider whether to add dataclasses later.
-
-**4) Implement Fixed Analysis / Plot / Save Helpers**
-
-- [+] `experiments/re_sampling_stability/metrics.py`:
-  - `compute_metrics(trace_records: list[dict], score_records: list[dict]) -> (d_within_df, baseline_vs_trans_df)` or accept DataFrames.
-  - Use `within_context_disagreement` and `kl_divergence` from `util` (may need to implement those there).
-- [+] `src/practical_deliberation_llms/io.py`:
-  - `save_results(config, output_dir, trace_df, scores_df, d_within_df, baseline_vs_trans_df)`.
-- [+] `src/practical_deliberation_llms/plotting.py`:
-  - `plot_results(output_dir, d_within_df, baseline_vs_trans_df)`.
-- [+] Then replace the TODO block in `run_experiment_async` with real calls.
-- [+] Watch out: import paths (avoid circular imports); ensure these modules do not depend on experiment-internal async logic.
-
-**5) Solidify Core Library Support (`util`, `inference`)**
-
-- [+] In `practical_deliberation_llms.util`:
-  - Implement: `logprobs_to_label_probs`, `parse_think_and_label`, `extract_label_from_json`, `kl_divergence`, `within_context_disagreement`.
-  - Keep `get_labelprobs_from_message` working for any existing notebooks.
-- [ ] In `practical_deliberation_llms.inference` (manual integration check):
-  - Confirm `InferenceClient.generate_trace` and `score_label_given_trace` work end-to-end with your vLLM/OpenAI server. This requires a running server and is intentionally left as a manual step.
-  - Longer term: move `score_label_given_trace` to `chat.completions` / structured outputs; not critical for the first experiment script, but important for consistency.
-- [ ] Things to watch:
-  - Logprob shapes from vLLM can differ from OpenAI’s; test this path early.
-  - Parsing `<think>...</think>` and JSON must be robust to model “creativity”.
-
-**6) Decide On Concurrency Model (Later)**
-
-- [ ] Once correctness is established and the baseline async flow is stable, consider:
-  - Batching reasoning and scoring with `asyncio.gather` for better throughput.
-  - Maybe a simple concurrency limit (semaphore) to avoid hammering vLLM.
-- [ ] Watch out: reproducibility with concurrency + seeding, and logging that remains readable.
-
-**7) Testing And Example Configs**
-
-- [+] Add at least:
-  - A minimal YAML example (no transform, small `n_problems`).
-  - A YAML example with a transformation function configured.
-- [+] Write small tests or scripts that:
-  - Call `build_config` with and without YAML (including empty string and `null` for `transform_problems_fn`).
-  - Run `run_experiment_async` with dummy pluggable functions (no real inference) to validate control flow and that the skip-transform logic behaves as intended.
-
-
-**8) Replacing `config.py` With chz**
-
-Here is a concrete way to move from the current ad‑hoc `dataclasses + argparse + YAML` setup to `chz` while preserving (or improving) behavior.
+1. Decide the scoring semantics:
+   - We follow the plan literally:
+     - Use `/v1/chat/completions`.
+     - Use `structured_outputs` with `structural_tag`.
+     - Force output format `<think>{r}</think>{"label": "<LABEL>"}`.
+     - Restrict `label` to a finite set `labels = ["a", "b", ...]`.
+     - Read `top_logprobs` at the *first* label token and map them to `P(label | context, r)` via `logprobs_to_label_probs`.
+   - IMPORTANTLY: We score *conditioned on the original trace*:
+     - Reasoning text `r` comes from the `trace["think"]` field produced in `experiments/re_sampling_stability/reasoning.py`.
+     - Scoring must use that `r`, not regenerate a new one.
 
 ---
 
-**1. What You Have Today**
+**Phase 1 – API Changes in `InferenceClient`**
 
-The current `ExperimentConfig` system in `experiments/re_sampling_stability/config.py` does three main things:
+3. Redesign `InferenceClient.score_label_given_trace` API:
+   - Current signature:  
+     `score_label_given_trace(self, prompt: str, labels: List[str]) -> Dict[str, float]`
+   - Target signature (one reasonable option):  
+     `score_label_given_trace(self, context_messages: List[dict], reasoning: str, labels: List[str]) -> Dict[str, float]`
+     - `context_messages`: chat messages describing decision situation, options, and scoring instructions, **excluding** `r`.
+     - `reasoning`: the fixed reasoning trace `r` (string) to enforce via grammar.
+     - `labels`: list of allowed labels (`["a", "b", ...]`).
 
-- Models config:
-  - `DatasetSpec` and `ExperimentConfig` as `@dataclass`es.
-- Loads config:
-  - Reads optional YAML (`--config-yaml`) into `cfg_from_yaml`.
-  - Enforces that `datasets` is a non‑empty list of mappings with `name`, `n_problems`, etc.
-- Merges CLI and YAML:
-  - CLI > YAML > argparse defaults via `resolve_field`.
-  - Special handling for:
-    - `transform_problems_fn`: empty string → `None`.
-    - `make_plots`: `--no-plots` boolean.
-    - `output_dir` (with TODO about timestamped subdir).
-  - Environment interplay: `openai_base_url` and `api_token` can be provided, otherwise you rely on env vars.
-
-`run_experiment.py` (not shown, but implied) consumes a ready‑made `ExperimentConfig`.
+4. Update all call sites:
+   - In `experiments/re_sampling_stability/judgment.py`, change how you call the scoring method:
+     - Instead of building a *single flat prompt string* via `SCORE_PROMPT_TEMPLATE`, RE-build or RETRIEVE `context_messages` from reasoning phase (likely a `system` + `user` pair), using exactly the same propmt templates that were used there.
+     - Pass `trace["think"]` (or fallback) as the `reasoning` argument.
+     - Pass the same `label_letters` list as `labels`.
 
 ---
 
-**2. Relevant chz Features**
+**Phase 2 – Build `structured_outputs` Grammar JSON**
 
-From the chz docs:
+6. Implement a helper to construct the `structural_tag` JSON:
+   - Place it either:
+     - In `InferenceClient` (private method), or
+     - In a small dedicated module (e.g. `practical_deliberation_llms/grammar.py`) if you want to reuse it elsewhere.
+   - Based on XGrammar docs and the plan, shape should be roughly:
 
-- 02_object_model:
-  - `@chz.chz` gives you an immutable, keyword‑only, dataclass‑like config object with validation hooks (`chz.field`, `@chz.init_property`).
-- 04_command_line:
-  - `chz.entrypoint` or `chz.nested_entrypoint` turns a class/function into a CLI, with automatic `--help`, type‑aware casting, nested objects, etc.
-- 05_blueprint:
-  - `chz.Blueprint(ConfigClass)` lets you apply partial config data (dicts, nested dicts) in stages; later `.apply()` calls override earlier ones → perfect for “YAML base, CLI override”.
-- 06_serialisation:
-  - `beta_to_blueprint_values` / `asdict` give you dicts that match what `Blueprint.apply()` expects; useful for saving/loading configs.
+     ```python
+     def make_structured_label_grammar(reasoning: str, labels: List[str]) -> dict:
+         return {
+             "structured_outputs": {
+                 "structural_tag": {
+                     "type": "structural_tag",
+                     "format": {
+                         "type": "sequence",
+                         "elements": [
+                             {
+                                 "type": "tag",
+                                 "begin": "<think>",
+                                 "content": {
+                                     "type": "const_string",
+                                     "value": reasoning,
+                                 },
+                                 "end": "</think>",
+                             },
+                             {
+                                 "type": "json_schema",
+                                 "json_schema": {
+                                     "type": "object",
+                                     "properties": {
+                                         "label": {
+                                             "type": "string",
+                                             "enum": labels,
+                                         },
+                                     },
+                                     "required": ["label"],
+                                     "additionalProperties": False,
+                                 },
+                             },
+                         ],
+                     },
+                 },
+             },
+         }
+     ```
 
-These map pretty directly onto what `config.py` is doing by hand.
+
+7. Make sure the grammar conforms to XGrammar docs:
+   - `structural_tag` root.
+   - `sequence` of `tag` then `json_schema`.
+   - `enum` on `label` matches allowed labels exactly (case, quotes).
 
 ---
 
-**3. Target Design With chz**
+**Phase 3 – Logprobs Extraction**
 
-The high‑level idea:
+8. Prepare the chat request parameters in `InferenceClient.score_label_given_trace`:
+    - Use the OpenAI Python SDK’s chat endpoint:
 
-- Represent `DatasetSpec` and `ExperimentConfig` as `@chz.chz` classes instead of `dataclasses.dataclass`.
-- Use `chz.entrypoint` (or `chz.nested_entrypoint`) to parse CLI into either:
-  - a full `ExperimentConfig`, or
-  - a small “launcher” config that combines a YAML file and CLI overrides into a final `ExperimentConfig`.
-- Use `Blueprint` to implement the “YAML + CLI with CLI precedence” behavior.
+      ```python
+      extra_body = make_structured_label_grammar(reasoning, labels)
 
-Step‑by‑step:
+      response = self.client.chat.completions.create(
+          model=self.model,
+          messages=context_messages,
+          temperature=0.0,
+          top_p=1.0,
+          logprobs=True,
+          max_tokens=...,  # see next step
+          extra_body=extra_body,
+      )
+      ```
 
-1) Model config as chz classes
+    - Decide `max_tokens`:
+      - Must be sufficient for:
+        - `<think>`
+        - Tokenization of `reasoning`
+        - `</think>`
+        - JSON snippet (`{"label": "X"}`)
+      - A safe starting point: `max_tokens = len(reasoning) // 2 + 32` or just a fixed upper bound (e.g. 512) if you don’t mind over‑allocating.
 
-- Replace:
+9. Determine label token step (`step_label_start`):
+    - From the plan, you need the index where the label’s first token is produced.
+    - One practical method:
 
-  ```python
-  @dataclass
-  class DatasetSpec:
-      name: str
-      n_problems: int
-      adapter_kwargs: Dict[str, Any]
-  ```
+      - Get generated text (assistant output) as a string.
+      - Find the offset of the substring that starts right before the label: e.g. after `{"label": "`.
+      - Use the token‑by‑token incremental reconstruction from `logprobs` to locate the token index where this substring begins.
+      - Pseudosteps:
+        - Initialize `accum = ""`.
+        - Iterate over generation steps, appending the chosen token at each step (from `choices[0].logprobs.tokens` or from the text slicing if available).
+        - When `accum` ends with `{"label": "`, record that step index as `step_label_start`.
+      - This aligns with the plan’s suggestion to “detokenize incrementally until we pass `{"label": "`”.
 
-  with something like:
+    - If vLLM’s chat `logprobs` format exposes tokens directly per step (similar to completions), you can rely on that structure / docs.
 
-  ```python
-  @chz.chz
-  class DatasetSpec:
-      name: str
-      n_problems: int
-      adapter_kwargs: dict[str, object] = chz.field(default_factory=dict)
-  ```
+10. Extract `top_logprobs` at that step:
+    - Once you have `step_label_start`, take:
 
-- Replace `ExperimentConfig` similarly:
+      ```python
+      top_logprobs_step = choice.logprobs.top_logprobs[step_label_start]
+      ```
 
-  ```python
-  @chz.chz
-  class ExperimentConfig:
-      candidate_model: str
-      assistant_model: str
-      openai_base_url: str | None = None
-      api_token: str | None = None
+      (exact attribute path may differ; adapt to vLLM’s actual structure.)
 
-      seed: int
-      datasets: list[DatasetSpec]
+    - This should be a list of dicts like `{"token": str, "logprob": float, ...}`.
 
-      n_traces_per_problem: int
-      temperature: float
-      top_p: float
+11. Convert to label probabilities:
+    - Call the existing helper from `src/practical_deliberation_llms/util.py`:
 
-      max_transformations_per_problem: int
+      ```python
+      label_probs = logprobs_to_label_probs(top_logprobs_step, labels)
+      ```
 
-      output_dir: str
-      make_plots: bool = True
+    - Keep the logging in `InferenceClient.score_label_given_trace` so it’s easier to debug.
 
-      transform_problems_fn: str | None = None
-      generate_reasoning_trace_fn: str
-      score_choice_labels_fn: str
-  ```
+---
 
-- Use `chz.field` and validation (from 03_validation / 22_field_api) to enforce invariants you currently check in `build_config`:
-  - Non‑empty `datasets`
-  - `n_problems > 0`
-  - `n_traces_per_problem > 0`, etc.
+**Phase 4 – Integrate with Experiment Pipeline**
 
-  For example:
+12. Update `score_choice_labels_for_trace` to use structured scoring:
+    - Change it to prepare `context_messages` and call the new `InferenceClient` method:
 
-  ```python
-  from chz.validators import gt
+      ```python
+      context_messages = build_scoring_messages(decision_situation, labeled_actions, think)
+      label_probs = inference_client.score_label_given_trace(
+          context_messages=context_messages,
+          reasoning=think or "",
+          labels=label_letters,
+      )
+      ```
 
-  @chz.chz
-  class DatasetSpec:
-      name: str
-      n_problems: int = chz.field(validator=gt(0))
-      adapter_kwargs: dict[str, object] = chz.field(default_factory=dict)
-  ```
+    - Retain its downstream behavior:
+      - Normalize probabilities to sum to 1.
+      - Fall back to uniform distribution if total mass is 0.
+      - Attach metadata (`problem_uid`, `trace_id`, `candidate_model`, `assistant_model`, etc.).
 
-2) Move env‑var defaults into config object
+13. Ensure trace data includes `think`:
+    - It already does in `experiments/re_sampling_stability/reasoning.py` (using `InferenceClient.generate_trace`).
+    - Still, handle missing `think`:
+      - If `think` is `None`, either:
+        - Skip structured scoring and fall back to legacy scoring.
+    - However, take care not to construct constraint that accidentally enforces, in step 6 above, "<think><think>...</think></think>"
+    - Insert generous logging for later debugging
 
-- Instead of relying on external env handling, you can embed it in an `init_property` (02_object_model / 21_post_init):
+16. Keep configuration defaults coherent:
+    - `experiments/re_sampling_stability/configs/*.yaml` currently point `score_choice_labels_fn` to `experiments.re_sampling_stability.judgment.score_choice_labels_for_trace`.
+    - Make sure the function signature in `judgment.py` is unchanged so YAML doesn’t need edits.
+    - If you add a feature flag (e.g. `use_structured_scoring`), extend `ExperimentConfig` / `CLIConfig` accordingly and plumb it through `run_experiment.py`.
 
-  ```python
-  @chz.chz
-  class ExperimentConfig:
-      openai_base_url: str | None = None
-      api_token: str | None = None
 
-      @chz.init_property
-      def effective_openai_base_url(self) -> str | None:
-          return self.openai_base_url or os.getenv("OPENAI_BASE_URL")
 
-      @chz.init_property
-      def effective_api_token(self) -> str | None:
-          return self.api_token or os.getenv("OPENAI_API_KEY")
-  ```
+# APPENDIX
 
-- Downstream code can then use `config.effective_openai_base_url` instead of re‑implementing fallback logic.
 
-3) Preserve “YAML base, CLI override” with Blueprint
+QUESTIONS:
+> 
+> 1) Exact prompts for the scoring step**
+> Questions:
+> 
+> 1) Do you want me to:>  - Completely retire `SCORE_PROMPT_TEMPLATE`, and
+- Use exactly the same `SYSTEM_PROMPT_TEMPLATE` and `USER_PROMPT_TEMPLATE` as the context messages for scoring (no scoring-specific text), relying entirely on the > structured grammar to enforce the `<think>…</think>{"label": ...}` behavior?
 
-Design a “launcher” config whose job is to specify the YAML file and optional overrides:
+YES 
 
-```python
-@chz.chz
-class ExperimentOverrides:
-    candidate_model: str | None = None
-    assistant_model: str | None = None
-    openai_base_url: str | None = None
-    api_token: str | None = None
-    seed: int | None = None
-    n_traces_per_problem: int | None = None
-    temperature: float | None = None
-    top_p: float | None = None
-    max_transformations_per_problem: int | None = None
-    output_dir: str | None = None
-    make_plots: bool | None = None
-    transform_problems_fn: str | None = None
-    generate_reasoning_trace_fn: str | None = None
-    score_choice_labels_fn: str | None = None
-```
+> 2) Or do you want a *separate* scoring-specific system/user prompt pair (e.g. with slightly different instructions) that we define once and reuse for scoring only?
 
-And then a CLI “envelope”:
+NO
 
-```python
-@chz.chz
-class LauncherConfig:
-    config_yaml: str  # path to YAML (required)
-    overrides: ExperimentOverrides = chz.field(default_factory=ExperimentOverrides)
-```
+> **2) Location and design of the grammar helper**
+> 
+> The plan suggests either:
+> 
+> - A private helper on `InferenceClient`, or
+> - A small dedicated module, e.g. `practical_deliberation_llms/grammar.py`.
+> 
+> Questions:
+> 
+> 3) Do you have a preference between:>  - `InferenceClient._make_structured_label_grammar(reasoning, labels)`, or>  - A shared `practical_deliberation_llms.grammar.make_structured_label_grammar(...)` that `InferenceClient` just calls?
 
-CLI entrypoint (04_command_line, 01_quickstart):
+I PREFER a standalone `grammar.py` MODULE.
 
-```python
-def main(cfg: LauncherConfig) -> None:
-    # 1. Load YAML into a plain dict
-    with open(cfg.config_yaml, "r", encoding="utf-8") as f:
-        yaml_data = yaml.safe_load(f) or {}
+4) Do you want a way to toggle between the strict `const_string` reasoning constraint and a relaxed `any_text` version (as described near lines 460–470 of > `PLAN_COLAB_NOTEBOOK.md`), e.g.:
+> 
+> - A boolean parameter on `score_label_given_trace` like `enforce_exact_reasoning: bool = True`, or
+> - A config flag on `ExperimentConfig`?
+> 
 
-    # 2. Apply YAML as base config
-    bp = chz.Blueprint(ExperimentConfig)
-    bp.apply(yaml_data)
+No configs for that, don't implement `any_text` at all.
+Instead: HARD-CODE `const_string`, keeping the code structured.
 
-    # 3. Apply CLI overrides on top (later apply wins)
-    override_dict = {k: v for k, v in chz.asdict(cfg.overrides).items() if v is not None}
-    bp.apply(override_dict)
 
-    experiment_cfg = bp.make()
 
-    # 4. Call existing experiment runner
-    run_experiment(experiment_cfg)
-```
+> 5) Is it acceptable to drop the old `prompt`-based signature entirely (and update the `DummyInferenceClient` in `tests/test_run_experiment_async.py` accordingly)
 
-Then:
+YES. drop the old `prompt`-based signature entirely
 
-```python
-if __name__ == "__main__":
-    chz.nested_entrypoint(main)
-```
+> , or do > you want a small backward-compat shim like:
 
-This gives you:
+NO, no shims
 
-- YAML as base config.
-- CLI overrides expressed as `overrides.seed=123`, `overrides.output_dir="/tmp/foo"`, etc.
-- CLI > YAML precedence implemented naturally via `Blueprint.apply`.
+> 
+> **4) Feature flag vs hard switch to structured scoring**
+> Questions:
+> 
+> 6) For the experiments under `experiments/re_sampling_stability`, do you want:
+> 
+> - A hard switch: always use structured scoring (chat + `structured_outputs`); the old `/v1/completions`-based scoring is effectively retired, or
 
-4) Handling `datasets` in YAML and CLI
+YES
 
-- YAML already holds `datasets` as a list of mappings; chz will happily cast that into `list[DatasetSpec]` when you call `Blueprint.apply(yaml_data)` as long as the shapes match.
-- If you need CLI overrides for datasets, chz’s nested argument syntax (04_command_line) lets you do things like:
+> - A config-controlled switch on `ExperimentConfig` (and optionally CLI/ YAML), e.g.:
 
-  - `datasets[0].n_problems=20`
-  - or use presets / partial blueprints if you want more ergonomic options.
+NO
 
-- To preserve the current “YAML must define non‑empty datasets” behavior, either:
-  - Keep that validation in `build_config`‑equivalent logic before constructing the blueprint, or
-  - Move it to class‑level `@chz.validate` on `ExperimentConfig`.
+> 
+> **5) Behavior when the trace is missing `think`**
+> 
+> Currently:
+> 
+> - `reasoning.py` logs warnings when `think` is missing but still produces a trace dict.
+> - `judgment.py` blindly includes `think` (possibly `None`) in `SCORE_PROMPT_TEMPLATE`.
+> 
+> Questions:
+> 
+> 7) What should the new behavior be when `trace["think"]` is missing or empty?
+> 
+> Options:
+> 
+> 1. Skip scoring for that trace entirely (and log a warning).
+
+YES
+
+> 2. Fall back to the legacy flat-prompt scoring (still via `score_label_given_trace`, but bypassing structured grammar).
+  NO
+> 3. Use structured grammar with `reasoning=""` (effectively “no reasoning”) and still score labels.
+  NO
+
+> **6) Labels: assumptions and constraints**
+> 
+> Right now:
+> 
+> - Experiments derive labels as `["a", "b", ...]` in both `reasoning.py` and `judgment.py`.
+> - `logprobs_to_label_probs` maps tokens to labels by substring matching (case insensitive).
+> 
+> Questions:
+> 
+8) Can we assume for this refactor that labels for scoring are *always* simple one-character strings (`"a"`, `"b"`, …) as generated today, or do you want the new code to > support arbitrary label strings (e.g. `"A"`, `"B"`, `"C"`, or `"yes"`, `"no"`) passed in via `labels`?
+> 
+If you want generality, I’ll slightly tighten `logprobs_to_label_probs` (e.g. prefer exact-equality matches on `token.strip('"').lower()` before falling back to substring> ) to be more robust to structured_outputs tokenization.
+
+YES, that is a good idea. Please implement this.
+
+> **7) Model choice for scoring vs reasoning**
+> 
+> In `run_experiment_async`, we currently construct:
+> 
+> ```python
+> inference_client = InferenceClient(client=client, model=config.candidate_model)
+> ```
+> 
+> Both trace generation and scoring use that same `candidate_model`, while `assistant_model` is just stored as metadata.
+> 
+> Questions:
+> 
+9) For this refactor, do you want to keep that behavior (scoring and reasoning use the same `candidate_model`)?
+
+YES, keep the behavior

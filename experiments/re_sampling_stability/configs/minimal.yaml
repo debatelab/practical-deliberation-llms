@@ -1,9 +1,9 @@
-candidate_model: "kit.mixtral-8x22b-instruct"
-assistant_model: "kit.mixtral-8x22b-instruct"
+candidate_model: "mistralai/Devstral-Small-2-24B-Instruct-2512" # "kit.gpt-oss-120b"
+assistant_model: "mistralai/Devstral-Small-2-24B-Instruct-2512" # "kit.gpt-oss-120b"
 
 datasets:
   - name: "daily_dilemmas"
-    n_problems: 10
+    n_problems: 4
     adapter_kwargs: {}
 
 n_traces_per_problem: 2
@@ -14,4 +14,7 @@ seed: 1234
 max_transformations_per_problem: 0
 
 output_dir: "experiments/re_sampling_stability/outputs/results_minimal"
+
 transform_problems_fn: ""
+generate_reasoning_trace_fn: "experiments.re_sampling_stability.reasoning.generate_reasoning_traces_for_problem"
+score_choice_labels_fn: "experiments.re_sampling_stability.judgment.score_choice_labels_for_trace"

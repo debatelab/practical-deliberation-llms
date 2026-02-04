@@ -18,6 +18,7 @@ from typing import Any, Dict, List
 import logging
 from openai import OpenAI
 
+from .grammar import make_structured_label_grammar
 from .util import (
     logprobs_to_label_probs,
     parse_think_and_label,
@@ -112,46 +113,86 @@ class InferenceClient:
         }
 
     def score_label_given_trace(
-        self, prompt: str, labels: List[str]
+        self,
+        context_messages: List[dict],
+        reasoning: str,
+        labels: List[str],
     ) -> Dict[str, float]:
-        """Score `P(label | prompt_with_reasoning)` using logprobs.
+        """Score ``P(label | context, reasoning)`` using structured_outputs.
 
-        Calls the OpenAI completions endpoint with `max_tokens=1` and
-        `logprobs=True`, then converts the first-step `top_logprobs` into
-        label probabilities using `logprobs_to_label_probs`.
+        This method calls the OpenAI chat completions endpoint with
+        ``logprobs=True`` and a structured_outputs grammar that forces the
+        assistant to emit ``<think>{reasoning}</think>{"label": "<LABEL>"}``,
+        where ``<LABEL>`` must be one of the provided ``labels``. It then
+        extracts the token-level logprobs at the *first* label token and
+        converts them into label probabilities via
+        :func:`logprobs_to_label_probs`.
         """
 
         logger.debug(
-            "score_label_given_trace call model=%s n_labels=%d",
+            "score_label_given_trace call model=%s n_labels=%d reasoning_len=%d",
             self.model,
             len(labels),
+            len(reasoning or ""),
         )
 
-        response = self.client.completions.create(
+        logger.debug("score_label_given_trace context_messages=%s", context_messages)
+
+        extra_body = make_structured_label_grammar(reasoning, labels)
+        logger.debug("score_label_given_trace extra_body=%s", extra_body)
+
+        # Conservative upper bound for generated tokens: reasoning plus
+        # tags and a small JSON object. This intentionally over-allocates
+        # a bit to avoid truncation.
+        max_tokens = max(len(reasoning) // 2 + 32, 64)
+
+        response = self.client.chat.completions.create(
             model=self.model,
-            prompt=prompt,
-            max_tokens=1,
+            messages=context_messages,
             temperature=0.0,
+            top_p=1.0,
             logprobs=True,
             top_logprobs=max(5, len(labels)),
+            max_tokens=max_tokens,
+            extra_body=extra_body,
         )
 
+        logger.debug("score_label_given_trace raw_response=%s", response)
+
         choice = response.choices[0]
+        message_logprobs = getattr(choice, "logprobs", None)
 
-        # vLLM OpenAI-completions format: logprobs.top_logprobs is
-        # list[list[dict]], where each dict has at least "token" and
-        # "logprob" keys. We normalize to a flat list of records.
-        logprobs_obj = choice.logprobs
-        try:
-            logprob_records = logprobs_obj.top_logprobs[0]
-        except AttributeError:  # pragma: no cover - defensive fallback
+        if not message_logprobs or not getattr(message_logprobs, "content", None):
+            logger.warning("score_label_given_trace missing_logprobs choice=%s", choice)
+            return {label: 0.0 for label in labels}
+
+        # vLLM chat logprobs format: logprobs.content is a list of
+        # per-token entries, each with .top_logprobs containing token
+        # logprob records. We reconstruct the generated text incrementally
+        # and locate the step where the label value begins.
+        content_entries = message_logprobs.content
+        logger.debug("score_label_given_trace logprobs_content=%s", content_entries)
+        accum = ""
+        label_prefix = '{"label": "'
+        step_label_start = None
+
+        for idx, entry in enumerate(content_entries):
+            token = entry.token  # type: ignore[attr-defined]
+            accum += token
+            if accum.endswith(label_prefix):
+                step_label_start = idx + 1
+                break
+
+        if step_label_start is None or step_label_start >= len(content_entries):
             logger.warning(
-                "score_label_given_trace unexpected_logprobs_structure type=%s",
-                type(logprobs_obj),
+                "score_label_given_trace could_not_locate_label_token prefix_seen=%s accum_tail=%r",
+                label_prefix in accum,
+                accum[-80:],
             )
-            logprob_records = logprobs_obj[0] if isinstance(logprobs_obj, list) else []
+            return {label: 0.0 for label in labels}
 
-        label_probs = logprobs_to_label_probs(logprob_records, labels)
+        top_logprobs_step = content_entries[step_label_start].top_logprobs  # type: ignore[attr-defined]
+        label_probs = logprobs_to_label_probs(top_logprobs_step, labels)
 
         logger.debug("score_label_given_trace label_probs=%s", label_probs)
 

@@ -14,4 +14,7 @@ seed: 1234
 max_transformations_per_problem: 1
 
 output_dir: "experiments/re_sampling_stability/outputs/results_with_transform"
+
 transform_problems_fn: "experiments.re_sampling_stability.transform.permutate_actions"
+generate_reasoning_trace_fn: "experiments.re_sampling_stability.reasoning.generate_reasoning_traces_for_problem"
+score_choice_labels_fn: "experiments.re_sampling_stability.judgment.score_choice_labels_for_trace"
