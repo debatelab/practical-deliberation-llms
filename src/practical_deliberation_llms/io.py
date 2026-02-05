@@ -40,9 +40,8 @@ def _sanitize_for_parquet(df: pd.DataFrame) -> pd.DataFrame:
     series = df["transformation_params"]
 
     # If the column is entirely missing / null / empty dicts, drop it.
-    if series.isna().all() or all(
-        (isinstance(v, dict) and not v) or v is None for v in series
-    ):
+    is_all_na = bool(series.isna().all())
+    if is_all_na or all((isinstance(v, dict) and not v) or v is None for v in series):
         return df.drop(columns=["transformation_params"])
 
     # Otherwise, convert to JSON strings for robust parquet serialization.
@@ -114,17 +113,23 @@ def save_results(
         trace_path = os.path.join(output_dir, "traces.parquet")
         trace_df.to_parquet(trace_path)
         logger.info("save_results traces path=%s rows=%d", trace_path, len(trace_df))
+
     if not scores_df.empty:
+        scores_df = _sanitize_for_parquet(scores_df)
         scores_path = os.path.join(output_dir, "scores.parquet")
         scores_df.to_parquet(scores_path)
         logger.info("save_results scores path=%s rows=%d", scores_path, len(scores_df))
+
     if not d_within_df.empty:
+        d_within_df = _sanitize_for_parquet(d_within_df)
         within_path = os.path.join(output_dir, "metrics_within.parquet")
         d_within_df.to_parquet(within_path)
         logger.info(
             "save_results metrics_within path=%s rows=%d", within_path, len(d_within_df)
         )
+
     if not baseline_vs_trans_df.empty:
+        baseline_vs_trans_df = _sanitize_for_parquet(baseline_vs_trans_df)
         baseline_path = os.path.join(output_dir, "metrics_baseline_vs_trans.parquet")
         baseline_vs_trans_df.to_parquet(baseline_path)
         logger.info(
