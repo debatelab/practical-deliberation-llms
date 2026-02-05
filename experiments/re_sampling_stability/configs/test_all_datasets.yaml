@@ -22,8 +22,8 @@ datasets:
     adapter_kwargs:
       subset: model_eval
       split: test
-n_traces_per_problem: 2
-temperature: 0.7
+n_traces_per_problem: 6
+temperature: 0.8
 top_p: 0.95
 seed: 1234
 
