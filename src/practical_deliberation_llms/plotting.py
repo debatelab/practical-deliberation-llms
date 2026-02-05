@@ -29,7 +29,15 @@ def plot_results(
 
     if not d_within_df.empty and "D_within" in d_within_df.columns:
         plt.figure(figsize=(10, 6))
-        sns.histplot(d_within_df["D_within"], hue="source_dataset", bins=30, kde=True)
+        histplot_kwargs = {
+            "data": d_within_df,
+            "x": "D_within",
+            "bins": 30,
+            "kde": True,
+        }
+        if "source_dataset" in d_within_df.columns:
+            histplot_kwargs["hue"] = "source_dataset"
+        sns.histplot(**histplot_kwargs)
         plt.title("Within-context disagreement (D_within)")
         plt.xlabel("D_within")
         plt.tight_layout()
