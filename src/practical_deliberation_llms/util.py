@@ -103,14 +103,10 @@ LABEL_JSON_REGEX = re.compile(
 # Prefix pattern for a JSON object conforming to the label schema defined
 # in ``formats.make_label_json_schema``. The regex matches from the
 # opening brace up to and including the opening quote of the
-# LABEL_FIELD_NAME value.
+# LABEL_FIELD_NAME value. This is kept separate from LABEL_JSON_REGEX
+# because callers like ``score_label_given_trace`` only care about the
+# point where the label value begins, not the entire JSON object.
 LABEL_PREFIX_REGEX = re.compile(rf"\{{\s*\"{re.escape(LABEL_FIELD_NAME)}\"\s*:\s*\"")
-# Prefix pattern for a JSON object containing a label field, up to and
-# including the opening quote for the label value. This is kept
-# separate from LABEL_JSON_REGEX because callers like
-# ``score_label_given_trace`` only care about the point where the label
-# value begins, not the entire JSON object.
-LABEL_PREFIX_REGEX = re.compile(r"\{\s*\"label\"\s*:\s*\"")
 
 
 def parse_think_and_label(text: str | None) -> Tuple[str | None, str | None]:
@@ -219,8 +215,7 @@ def within_context_disagreement(dists: List[np.ndarray]) -> float:
         D_within = (1/n) * sum_i KL(Q_i || Q_bar)
 
     where ``Q_i`` are the input distributions and ``Q_bar`` is their
-    mean distribution. This mirrors the definition used in the Colab
-    notebook and `PLAN_COLAB_NOTEBOOK.md`.
+    mean distribution.
     """
 
     if not dists:

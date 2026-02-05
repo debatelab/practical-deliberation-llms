@@ -36,12 +36,9 @@ class InferenceClient:
 
     - `generate_trace` uses `chat.completions.create` to sample `<think>`
       reasoning plus a JSON label answer.
-    - `score_label_given_trace` currently uses `completions.create` with
-      `logprobs=True` to obtain probabilities for candidate labels given a
-      fixed prompt.
-
-    TODO: Migrate `score_label_given_trace` to use `chat.completions.create`
-    in line with the project-wide decision to avoid `/v1/completions`.
+    - `score_label_given_trace` uses `chat.completions.create` with
+      ``logprobs=True`` and a structured_outputs grammar to estimate
+      ``P(label | context, reasoning)`` over a fixed set of candidate labels.
     """
 
     def __init__(self, client: AsyncOpenAI, model: str):

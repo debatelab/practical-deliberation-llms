@@ -43,11 +43,9 @@ class DatasetSpec:
 class ExperimentConfig:
     """Configuration for a single experiment run.
 
-    This mirrors the high-level parameters described in
-    ``experiments/re_sampling_stability/PLAN_COLAB_NOTEBOOK.md`` but is kept
-    minimal on purpose. If you extend the CLI, add corresponding fields
-    here so that downstream code can access them without additional
-    parameters.
+    The configuration is intentionally minimal. If you extend the CLI,
+    add corresponding fields here so that downstream code can access them
+    without additional parameters.
     """
 
     # Model and API settings
