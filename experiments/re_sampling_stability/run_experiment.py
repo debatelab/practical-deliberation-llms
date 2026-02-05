@@ -53,7 +53,7 @@ import chz
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from practical_deliberation_llms.datasets import sample_problems
 from practical_deliberation_llms.inference import InferenceClient
@@ -199,15 +199,22 @@ async def run_experiment_async(
     This function wires together dataset loading, problem transformation,
     reasoning trace generation, scoring, and downstream analysis.
 
-    All pluggable functions are expected to be async and are awaited
-    sequentially for now. If/when we introduce parallelism (e.g. via
-    `asyncio.gather` on batches), this is the place to do it.
+    All pluggable functions are expected to be async. Transformations are
+    currently applied sequentially per problem. Reasoning and scoring are
+    executed with bounded concurrency controlled by `config.max_concurrency`
+    via an `asyncio.Semaphore` and `asyncio.gather`.
     """
 
     logger.info("Experiment configuration: %s", chz.asdict(config))
 
     # Ensure output directory is fresh so we do not overwrite existing results.
     ensure_fresh_output_dir(config.output_dir)
+
+    # Concurrency control for reasoning and scoring stages.
+    max_concurrency = getattr(config, "max_concurrency", 64)
+    if max_concurrency <= 0:  # pragma: no cover - defensive; config validates
+        max_concurrency = 64
+    semaphore = asyncio.Semaphore(max_concurrency)
 
     # Initialize client and wrapper. We load a .env file (if present) so
     # that OPENAI_BASE_URL and OPENAI_API_KEY can be configured without
@@ -221,7 +228,7 @@ async def run_experiment_async(
     if config.effective_api_token:
         client_kwargs["api_key"] = config.effective_api_token
 
-    client = OpenAI(**client_kwargs)
+    client = AsyncOpenAI(**client_kwargs)
     inference_client = InferenceClient(client=client, model=config.candidate_model)
 
     # Ensure output directory exists
@@ -316,31 +323,50 @@ async def run_experiment_async(
     # ------------------------------------------------------------------
     trace_records: List[dict] = []
 
-    for idx, problem in enumerate(all_problems):
+    async def _reason_for_problem(idx: int, problem: Any) -> List[dict]:
         if idx % 10 == 0:
             logger.debug(
                 "Generating traces for problem %d / %d", idx, len(all_problems)
             )
 
-        try:
-            traces_for_problem = await generate_reasoning_trace_fn(
-                config,
-                inference_client,
-                problem,
-            )
-        except Exception:  # pragma: no cover - defensive logging, re-raise
-            logger.exception(
-                "Reasoning failed for problem_idx=%d problem_uid=%s",
-                idx,
-                getattr(problem, "problem_uid", None),
-            )
-            raise
+        async with semaphore:
+            try:
+                traces_for_problem = await generate_reasoning_trace_fn(
+                    config,
+                    inference_client,
+                    problem,
+                )
+            except Exception:  # pragma: no cover - defensive logging, re-raise
+                logger.exception(
+                    "Reasoning failed for problem_idx=%d problem_uid=%s",
+                    idx,
+                    getattr(problem, "problem_uid", None),
+                )
+                raise
 
-        # TODO: The default implementation is expected to generate
-        # `config.n_traces_per_problem` traces, but we do not enforce that
-        # here. It is responsibility of the pluggable function to respect
-        # this hyperparameter where appropriate.
-        trace_records.extend(traces_for_problem)
+        if traces_for_problem is None:
+            raise TypeError(
+                "generate_reasoning_trace_fn must return a non-None sequence; "
+                "got None instead"
+            )
+
+        # NOTE: We intentionally coerce to list here to avoid surprises if the
+        # pluggable returns a non-list sequence.
+        return list(traces_for_problem)
+
+    if all_problems:
+        reasoning_results = await asyncio.gather(
+            *[
+                _reason_for_problem(idx, problem)
+                for idx, problem in enumerate(all_problems)
+            ]
+        )
+        for traces_for_problem in reasoning_results:
+            # TODO: The default implementation is expected to generate
+            # `config.n_traces_per_problem` traces, but we do not enforce that
+            # here. It is responsibility of the pluggable function to respect
+            # this hyperparameter where appropriate.
+            trace_records.extend(traces_for_problem)
 
     if not trace_records:
         logger.warning(
@@ -354,26 +380,43 @@ async def run_experiment_async(
     # ------------------------------------------------------------------
     score_records: List[dict] = []
 
-    for idx, trace in enumerate(trace_records):
+    async def _score_single_trace(idx: int, trace: dict) -> List[dict]:
         if idx % 50 == 0:
             logger.debug("Scoring labels for trace %d / %d", idx, len(trace_records))
 
-        try:
-            scores_for_trace = await score_choice_labels_fn(
-                config,
-                inference_client,
-                trace,
-            )
-        except Exception:  # pragma: no cover - defensive logging, re-raise
-            logger.exception(
-                "Scoring failed for trace_idx=%d trace_id=%s problem_uid=%s",
-                idx,
-                trace.get("trace_id"),
-                trace.get("problem_uid"),
-            )
-            raise
+        async with semaphore:
+            try:
+                scores_for_trace = await score_choice_labels_fn(
+                    config,
+                    inference_client,
+                    trace,
+                )
+            except Exception:  # pragma: no cover - defensive logging, re-raise
+                logger.exception(
+                    "Scoring failed for trace_idx=%d trace_id=%s problem_uid=%s",
+                    idx,
+                    trace.get("trace_id"),
+                    trace.get("problem_uid"),
+                )
+                raise
 
-        score_records.extend(scores_for_trace)
+        if scores_for_trace is None:
+            raise TypeError(
+                "score_choice_labels_fn must return a non-None sequence; "
+                "got None instead"
+            )
+
+        return list(scores_for_trace)
+
+    if trace_records:
+        scoring_results = await asyncio.gather(
+            *[
+                _score_single_trace(idx, trace)
+                for idx, trace in enumerate(trace_records)
+            ]
+        )
+        for scores_for_trace in scoring_results:
+            score_records.extend(scores_for_trace)
 
     if not score_records:
         logger.warning(

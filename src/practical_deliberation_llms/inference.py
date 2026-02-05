@@ -12,15 +12,17 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 from openai.types.chat.chat_completion_token_logprob import (
     ChatCompletionTokenLogprob,
     TopLogprob,
 )
 
+from .formats import LABEL_FIELD_NAME
 from .grammar import make_structured_label_grammar
 from .util import (
+    LABEL_PREFIX_REGEX,
     extract_label_from_json,
     logprobs_to_label_probs,
     parse_think_and_label,
@@ -42,11 +44,11 @@ class InferenceClient:
     in line with the project-wide decision to avoid `/v1/completions`.
     """
 
-    def __init__(self, client: OpenAI, model: str):
+    def __init__(self, client: AsyncOpenAI, model: str):
         self.client = client
         self.model = model
 
-    def generate_trace(
+    async def generate_trace(
         self,
         system_prompt: str,
         user_prompt: str,
@@ -78,7 +80,7 @@ class InferenceClient:
             seed,
         )
 
-        response: ChatCompletion = self.client.chat.completions.create(
+        response: ChatCompletion = await self.client.chat.completions.create(
             model=self.model,
             messages=messages,
             temperature=temperature,
@@ -112,7 +114,7 @@ class InferenceClient:
             "label": label,
         }
 
-    def score_label_given_trace(
+    async def score_label_given_trace(
         self,
         context_messages: list[ChatCompletionMessageParam],
         reasoning: str,
@@ -146,7 +148,7 @@ class InferenceClient:
         # a bit to avoid truncation.
         max_tokens = max(len(reasoning) // 2 + 32, 64)
 
-        response: ChatCompletion = self.client.chat.completions.create(
+        response: ChatCompletion = await self.client.chat.completions.create(
             model=self.model,
             messages=context_messages,
             temperature=0.0,
@@ -170,24 +172,36 @@ class InferenceClient:
         # per-token entries, each with ``.top_logprobs`` containing
         # `TopLogprob` records. We reconstruct the generated text
         # incrementally and locate the step where the label value begins.
+        # The prefix we look for must stay in sync with the JSON schema
+        # defined in ``formats.make_label_json_schema``.
         content_entries: List[ChatCompletionTokenLogprob] = message_logprobs.content
         logger.debug("score_label_given_trace logprobs_content=%s", content_entries)
         accum = ""
-        label_prefix = '{"label": "'
+        # Allow for arbitrary whitespace between the opening brace,
+        # the label field name (see ``LABEL_FIELD_NAME``), the colon,
+        # and the opening quote of the value. This is robust to
+        # formats like:
+        #   {"label":"a"}
+        #   { "label" : "a" }
+        #   {\n  "label": "a"\n}
         step_label_start: int | None = None
 
         for idx, entry in enumerate(content_entries):
             token: str = entry.token
             accum += token
-            if accum.endswith(label_prefix):
+            tail = accum[-128:]
+            # We only care whether the tail ends with a label prefix.
+            # Using a regex here makes us insensitive to whitespace
+            # choices in the JSON object produced by the model.
+            if LABEL_PREFIX_REGEX.search(tail) and tail.rstrip().endswith('"'):
                 step_label_start = idx + 1
                 break
 
         if step_label_start is None or step_label_start >= len(content_entries):
+            tail = accum[-80:]
             logger.warning(
-                "score_label_given_trace could_not_locate_label_token prefix_seen=%s accum_tail=%r",
-                label_prefix in accum,
-                accum[-80:],
+                "score_label_given_trace could_not_locate_label_token accum_tail=%r",
+                tail,
             )
             return {label: 0.0 for label in labels}
 

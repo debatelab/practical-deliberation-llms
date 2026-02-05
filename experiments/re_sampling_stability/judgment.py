@@ -103,7 +103,7 @@ async def score_choice_labels_for_trace(
         {"role": "user", "content": user_prompt},
     ]
 
-    label_probs = inference_client.score_label_given_trace(
+    label_probs = await inference_client.score_label_given_trace(
         context_messages=context_messages,
         reasoning=think,
         labels=label_letters,

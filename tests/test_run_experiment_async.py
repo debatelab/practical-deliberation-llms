@@ -66,7 +66,7 @@ async def test_run_experiment_async_with_dummy_pluggables(monkeypatch, tmp_path)
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 
-    monkeypatch.setattr(mod, "OpenAI", DummyClient)
+    monkeypatch.setattr(mod, "AsyncOpenAI", DummyClient)
 
     dummy_inference = DummyInferenceClient()
 
@@ -157,7 +157,7 @@ async def test_run_experiment_async_writes_jsonl_when_configured(monkeypatch, tm
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 
-    monkeypatch.setattr(mod, "OpenAI", DummyClient)
+    monkeypatch.setattr(mod, "AsyncOpenAI", DummyClient)
 
     dummy_inference = DummyInferenceClient()
 
@@ -245,7 +245,7 @@ async def test_run_experiment_async_fails_if_output_dir_exists(monkeypatch, tmp_
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 
-    monkeypatch.setattr(mod, "OpenAI", DummyClient)
+    monkeypatch.setattr(mod, "AsyncOpenAI", DummyClient)
 
     dummy_inference = DummyInferenceClient()
 

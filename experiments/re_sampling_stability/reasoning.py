@@ -59,7 +59,7 @@ where the label is one of: {{ labels|join(", ") }}.
 
 
 USER_PROMPT_TEMPLATE = Template(
-    """You are considering the following practical dilemma.
+    """You are considering the following situation.
 
 Decision situation:
 {{ decision_situation }}
@@ -130,7 +130,7 @@ async def generate_reasoning_traces_for_problem(
             base_uid,
         )
 
-        trace_info = inference_client.generate_trace(
+        trace_info = await inference_client.generate_trace(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=float(getattr(config, "temperature", 0.7)),

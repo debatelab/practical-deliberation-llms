@@ -70,6 +70,9 @@ class ExperimentConfig:
     temperature: float
     top_p: float
 
+    # Concurrency
+    max_concurrency: int = 64
+
     # Transformations
     max_transformations_per_problem: int
 
@@ -140,6 +143,9 @@ class ExperimentConfig:
             or self.n_traces_per_problem <= 0
         ):
             raise ValueError("n_traces_per_problem must be a positive integer")
+
+        if not isinstance(self.max_concurrency, int) or self.max_concurrency <= 0:
+            raise ValueError("max_concurrency must be a positive integer")
 
         if not isinstance(self.temperature, (int, float)) or self.temperature <= 0:
             raise ValueError("temperature must be a positive number")
@@ -254,6 +260,7 @@ class CLIConfig:
     n_traces_per_problem: int | None = None
     temperature: float | None = None
     top_p: float | None = None
+    max_concurrency: int | None = None
     max_transformations_per_problem: int | None = None
     output_dir: str | None = None
     make_plots: bool | None = None
