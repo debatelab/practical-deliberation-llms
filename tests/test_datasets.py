@@ -126,3 +126,185 @@ def test_aita_adapter_full_integration() -> None:
         # Ensure the template survived into the PracticalProblem instance
         assert p.decision_situation.startswith(prefix)
         assert "'''" in p.decision_situation
+
+
+def test_msmdilemmas_adapter_accumulates_history() -> None:
+    """Multi-step Moral Dilemmas adapter should accumulate prior situations."""
+
+    assert "MSMDilemmas" in ADAPTER_REGISTRY
+
+    df = load_normalized_dataset(
+        "MSMDilemmas",
+        adapter_kwargs={"framework": "MFT"},
+    )
+    assert not df.empty
+
+    for col in ("decision_situation", "actions", "metadata", "problem_uid"):
+        assert col in df.columns
+
+    # Find a later step (>= 3) so that there is meaningful history to check.
+    later_row = None
+    for _, row in df.iterrows():
+        meta_obj = row["metadata"]
+        assert isinstance(meta_obj, dict)
+        stage_index = meta_obj.get("stage_index")
+        if isinstance(stage_index, int) and stage_index >= 3:
+            later_row = row
+            break
+
+    assert later_row is not None, "Expected at least one scenario with >= 3 steps"
+
+    meta_obj = later_row["metadata"]
+    assert isinstance(meta_obj, dict)
+    stage_index = meta_obj["stage_index"]
+    situations_so_far = meta_obj.get("situations_so_far")
+
+    assert isinstance(situations_so_far, list)
+    assert len(situations_so_far) == stage_index
+
+    ds_text = later_row["decision_situation"]
+
+    # The accumulated situation text should include numbered steps for all
+    # situations up to the current stage.
+    for idx, sit in enumerate(situations_so_far, start=1):
+        if sit:
+            snippet = f"- Step {idx}: {sit}"
+            assert snippet in ds_text
+
+    # The dilemma header should reference the current step index.
+    assert f"Current dilemma (step {stage_index}):" in ds_text
+
+    # Basic adapter metadata and action sanity checks.
+    assert len(later_row["actions"]) == 2
+    assert meta_obj.get("source_dataset") == "MSMDilemmas"
+    assert meta_obj.get("framework") == "MFT"
+    assert meta_obj.get("scenario_id") == meta_obj.get("source_id")
+
+    problem_uid = later_row["problem_uid"]
+    assert isinstance(problem_uid, str)
+    assert problem_uid.startswith("mmd::MFT::")
+    assert f"::step{stage_index}" in problem_uid
+
+    # End-to-end through sample_problems -> PracticalProblem
+    n = 3
+    problems = sample_problems(
+        dataset_name="MSMDilemmas",
+        n_problems=n,
+        seed=0,
+        adapter_kwargs={"framework": "MFT"},
+    )
+    assert len(problems) == n
+
+    for p in problems:
+        _assert_problem_basic_shape(p)
+        assert len(p.actions) == 2
+        assert p.source_dataset == "MSMDilemmas"
+        assert isinstance(p.problem_uid, str)
+        assert p.problem_uid.startswith("mmd::MFT::")
+
+
+def test_role_conflict_bench_adapter_basic_integration() -> None:
+    """Load RoleConflictBench from HF and normalize to PracticalProblems."""
+
+    assert "RoleConflictBench" in ADAPTER_REGISTRY
+
+    df = load_normalized_dataset(
+        "RoleConflictBench",
+        adapter_kwargs={"name": "default", "split": "train"},
+    )
+    assert not df.empty
+
+    for col in ("decision_situation", "actions", "metadata", "problem_uid"):
+        assert col in df.columns
+
+    first = df.iloc[0]
+    assert isinstance(first["decision_situation"], str)
+    assert isinstance(first["actions"], list)
+    assert len(first["actions"]) == 2
+
+    meta = first["metadata"]
+    assert isinstance(meta, dict)
+    assert meta.get("source_dataset") == "RoleConflictBench"
+    assert meta.get("hf_dataset_id") == "DebateLabKIT/role-conflict-bench"
+    assert meta.get("hf_config") == "default"
+    assert meta.get("hf_split") == "train"
+    assert meta.get("source_id") is not None
+
+    problem_uid = first["problem_uid"]
+    assert isinstance(problem_uid, str)
+    assert problem_uid.startswith("role_conflict::")
+
+    # End-to-end through sample_problems -> PracticalProblem
+    n = 3
+    problems = sample_problems(
+        dataset_name="RoleConflictBench",
+        n_problems=n,
+        seed=0,
+        adapter_kwargs={"name": "default", "split": "train"},
+    )
+    assert len(problems) == n
+
+    for p in problems:
+        _assert_problem_basic_shape(p)
+        assert len(p.actions) == 2
+        assert p.source_dataset == "RoleConflictBench"
+        assert isinstance(p.problem_uid, str)
+        assert p.problem_uid.startswith("role_conflict::")
+
+
+def test_airisk_dilemmas_adapter_basic_integration() -> None:
+    """Load AIRiskDilemmas from HF and normalize to PracticalProblems."""
+
+    assert "AIRiskDilemmas" in ADAPTER_REGISTRY
+
+    df = load_normalized_dataset(
+        "AIRiskDilemmas",
+        adapter_kwargs={"subset": "model_eval", "split": "test"},
+    )
+    assert not df.empty
+
+    for col in ("decision_situation", "actions", "metadata", "problem_uid"):
+        assert col in df.columns
+
+    first = df.iloc[0]
+    assert isinstance(first["decision_situation"], str)
+    assert isinstance(first["actions"], list)
+    assert len(first["actions"]) >= 2
+    assert all(isinstance(a, str) and a.strip() for a in first["actions"])
+
+    meta = first["metadata"]
+    assert isinstance(meta, dict)
+    assert meta.get("source_dataset") == "AIRiskDilemmas"
+    assert meta.get("hf_dataset_id") == "kellycyy/AIRiskDilemmas"
+    assert meta.get("hf_subset") == "model_eval"
+    assert meta.get("hf_split") == "test"
+    assert meta.get("source_id") is not None
+
+    # Per-action annotations should line up with the number of actions.
+    values_per_action = meta.get("values_per_action")
+    targets_per_action = meta.get("targets_per_action")
+    assert isinstance(values_per_action, list)
+    assert isinstance(targets_per_action, list)
+    assert len(values_per_action) == meta.get("num_actions")
+    assert len(targets_per_action) == meta.get("num_actions")
+
+    problem_uid = first["problem_uid"]
+    assert isinstance(problem_uid, str)
+    assert problem_uid.startswith("airisk::model_eval::")
+
+    # End-to-end through sample_problems -> PracticalProblem
+    n = 3
+    problems = sample_problems(
+        dataset_name="AIRiskDilemmas",
+        n_problems=n,
+        seed=0,
+        adapter_kwargs={"subset": "model_eval", "split": "test"},
+    )
+    assert len(problems) == n
+
+    for p in problems:
+        _assert_problem_basic_shape(p)
+        assert len(p.actions) >= 2
+        assert p.source_dataset == "AIRiskDilemmas"
+        assert isinstance(p.problem_uid, str)
+        assert p.problem_uid.startswith("airisk::model_eval::")
