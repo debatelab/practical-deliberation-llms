@@ -33,7 +33,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List
 
-from jinja2 import Template
 from openai.types.chat import ChatCompletionMessageParam
 
 from practical_deliberation_llms.inference import InferenceClient
