@@ -2,14 +2,16 @@
 
 This script wires together the high-level workflow:
 
-    1. Parse an :class:`ExperimentConfig` from the command line via
+    1. Parse a :class:`CLIConfig` from the command line via
        :func:`chz.nested_entrypoint`.
-    2. If ``config_yaml`` is provided, load a YAML configuration and merge
-       it with CLI values (CLI taking precedence) to obtain the final
+    2. Load a YAML configuration from ``config_yaml`` and combine it with any
+       non-``None`` CLI overrides (CLI taking precedence) to obtain the final
        :class:`ExperimentConfig`.
-    3. Initialize an OpenAI-compatible client and the InferenceClient wrapper.
-    4. Load decision problems from a configured dataset.
-    5. Apply a *pluggable* async transformation function to each problem.
+    3. Initialize an OpenAI-compatible client and the :class:`InferenceClient`
+       wrapper using the configured model and API settings.
+    4. Load decision problems from one or more configured datasets.
+    5. Optionally apply a *pluggable* async transformation function to each
+       base problem to generate transformed variants.
     6. Apply a *pluggable* async reasoning generation function to each
        (possibly transformed) problem to obtain reasoning traces.
     7. Apply a *pluggable* async scoring function to each reasoning trace to

@@ -18,10 +18,12 @@ The behavior implemented here is intentionally simple and conservative:
   randomly permuted.
 
 The goal of this transformation is to study how stable model judgments
-are under re-sampling of option order, without changing any other fields
-of the ``PracticalProblem`` instances. We therefore avoid attaching any
+are under re-sampling of option order. We therefore avoid attaching any
 additional metadata here and keep the return type as plain
-``PracticalProblem`` objects.
+``PracticalProblem`` objects. For transformed variants we construct fresh
+``PracticalProblem`` instances from the decision situation and a
+permuted ``actions`` list, so any extra fields present on the original
+problem are not preserved.
 """
 
 from __future__ import annotations

@@ -12,14 +12,15 @@ the model's reasoning, then calls
 distribution over labels.
 
 The function returns a list of plain dicts, one per label, with at least
-the following keys:
+the following keys for traces that can be scored:
 
 - ``problem_uid``: str
 - ``trace_id``: str
 - ``label``: str (e.g. "a")
 - ``prob``: float, normalized so that the probabilities across labels
-  sum to 1.0. Degenerate all-zero cases fall back to a uniform
-  distribution.
+  sum to 1.0 for traces where the model assigns non-zero mass to the
+  candidate labels. Traces with missing reasoning or zero total mass are
+  skipped and contribute no records.
 
 Additionally, where present in the input trace, we propagate
 ``base_problem_uid``, ``transformation_type``,
@@ -58,6 +59,14 @@ async def score_choice_labels_for_trace(
     trace:
         Trace record as produced by
         ``generate_reasoning_traces_for_problem``.
+
+    Returns
+    -------
+    list of dict
+        One record per label for traces that can be scored. If the trace
+        is missing reasoning content (``think``) or the model assigns zero
+        total probability mass to all candidate labels, an empty list is
+        returned and the trace is effectively skipped.
     """
 
     actions = list(trace.get("actions", []))
