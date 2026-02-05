@@ -1,5 +1,10 @@
+# Confis
+opencode.json
+.zed
+
 # Output folders
 outputs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
