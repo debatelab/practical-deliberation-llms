@@ -15,6 +15,7 @@
   "n_traces_per_problem": 2,
   "openai_base_url": null,
   "output_dir": "experiments/re_sampling_stability/outputs/results_minimal",
+  "results_file_format": "jsonl",
   "score_choice_labels_fn": "experiments.re_sampling_stability.judgment.score_choice_labels_for_trace",
   "seed": 1234,
   "temperature": 0.7,

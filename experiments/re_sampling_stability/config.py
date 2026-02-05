@@ -8,6 +8,7 @@ configuration files.
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
@@ -75,6 +76,15 @@ class ExperimentConfig:
     # Analysis / IO
     output_dir: str
     make_plots: bool = False
+    # Output format for tabular results written by the experiment pipeline.
+    # Supported values:
+    #   - "jsonl": write newline-delimited JSON files with *.jsonl suffix (default).
+    #   - "parquet": write *.parquet files.
+    results_file_format: str = "jsonl"
+
+    # Logging
+    # Default to INFO to avoid overly verbose logs for typical runs.
+    log_level: str = "INFO"
 
     # For reproducibility / logging it is useful to also store the string
     # representation of the pluggable functions that were used. The
@@ -147,6 +157,26 @@ class ExperimentConfig:
 
         if not isinstance(self.output_dir, str) or not self.output_dir:
             raise ValueError("output_dir must be a non-empty string")
+
+        allowed_formats = {"parquet", "jsonl"}
+        if self.results_file_format not in allowed_formats:
+            raise ValueError(
+                "results_file_format must be one of "
+                f"{sorted(allowed_formats)}, got {self.results_file_format!r}"
+            )
+
+        # Validate log_level: must be a standard logging level name.
+        if not isinstance(self.log_level, str):
+            raise ValueError("log_level must be a string")
+
+        level_name = self.log_level.upper()
+        level_value = getattr(logging, level_name, None)
+        if not isinstance(level_value, int):
+            raise ValueError(
+                "log_level must be a standard logging level name like "
+                "'DEBUG', 'INFO', 'WARNING', 'ERROR', or 'CRITICAL'; "
+                f"got {self.log_level!r}"
+            )
 
 
 def _load_yaml_config(path: str | None) -> dict[str, Any]:
@@ -227,9 +257,14 @@ class CLIConfig:
     max_transformations_per_problem: int | None = None
     output_dir: str | None = None
     make_plots: bool | None = None
+    results_file_format: str | None = None
     transform_problems_fn: str | None = None
     generate_reasoning_trace_fn: str | None = None
     score_choice_labels_fn: str | None = None
+
+    # Logging override (e.g. "DEBUG", "INFO", ...). When provided, this
+    # overrides the value from the YAML configuration.
+    log_level: str | None = None
 
 
 def build_config_from_cli(cli_cfg: CLIConfig) -> ExperimentConfig:

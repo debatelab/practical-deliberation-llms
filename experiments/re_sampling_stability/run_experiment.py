@@ -57,7 +57,7 @@ from openai import OpenAI
 
 from practical_deliberation_llms.datasets import sample_problems
 from practical_deliberation_llms.inference import InferenceClient
-from practical_deliberation_llms.io import save_results
+from practical_deliberation_llms.io import ensure_fresh_output_dir, save_results
 from practical_deliberation_llms.plotting import plot_results
 
 from .config import CLIConfig, ExperimentConfig, build_config_from_cli
@@ -156,17 +156,31 @@ def set_global_seeds(seed: int) -> None:
     np.random.seed(seed)
 
 
-def setup_logging(verbose: bool = False) -> None:
+def setup_logging(level: str | int | None = None) -> None:
     """Configure a basic logging setup for the CLI.
 
     Parameters
     ----------
-    verbose:
-        If True, use DEBUG level; otherwise INFO.
+    level:
+        Logging level to use. May be a standard level name (e.g. "DEBUG",
+        "info", "WARNING") or an integer (e.g. 10 for DEBUG). If None,
+        defaults to INFO.
     """
 
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(level=level, format="[%(levelname)s] %(message)s")
+    if isinstance(level, str):
+        level_name = level.upper()
+        numeric_level = getattr(logging, level_name, None)
+        if not isinstance(numeric_level, int):
+            raise ValueError(
+                "Invalid log level name {!r}; expected one of DEBUG, INFO, "
+                "WARNING, ERROR, CRITICAL or an integer value".format(level)
+            )
+    elif isinstance(level, int):
+        numeric_level = level
+    else:
+        numeric_level = logging.INFO
+
+    logging.basicConfig(level=numeric_level, format="[%(levelname)s] %(message)s")
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +205,9 @@ async def run_experiment_async(
     """
 
     logger.info("Experiment configuration: %s", chz.asdict(config))
+
+    # Ensure output directory is fresh so we do not overwrite existing results.
+    ensure_fresh_output_dir(config.output_dir)
 
     # Initialize client and wrapper. We load a .env file (if present) so
     # that OPENAI_BASE_URL and OPENAI_API_KEY can be configured without
@@ -383,6 +400,7 @@ async def run_experiment_async(
         scores_df=scores_df,
         d_within_df=d_within_df,
         baseline_vs_trans_df=baseline_vs_trans_df,
+        results_file_format=config.results_file_format,
     )
 
     if config.make_plots:
@@ -411,9 +429,10 @@ def main_chz(cli_cfg: CLIConfig) -> None:
     :func:`run_experiment_async`.
     """
 
-    setup_logging(verbose=True)
-
     config = build_config_from_cli(cli_cfg)
+
+    # Configure logging based on the experiment configuration.
+    setup_logging(config.log_level)
 
     # Seed RNGs based on the final configuration so that YAML / override
     # changes always affect the experiment deterministically.
@@ -426,14 +445,18 @@ def main_chz(cli_cfg: CLIConfig) -> None:
     generate_reasoning_trace_fn = resolve_callable(config.generate_reasoning_trace_fn)
     score_choice_labels_fn = resolve_callable(config.score_choice_labels_fn)
 
-    asyncio.run(
-        run_experiment_async(
-            config=config,
-            transform_problems_fn=transform_problems_fn,
-            generate_reasoning_trace_fn=generate_reasoning_trace_fn,
-            score_choice_labels_fn=score_choice_labels_fn,
+    try:
+        asyncio.run(
+            run_experiment_async(
+                config=config,
+                transform_problems_fn=transform_problems_fn,
+                generate_reasoning_trace_fn=generate_reasoning_trace_fn,
+                score_choice_labels_fn=score_choice_labels_fn,
+            )
         )
-    )
+    except FileExistsError as exc:
+        logger.error(str(exc))
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entry point

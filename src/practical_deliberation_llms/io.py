@@ -23,6 +23,22 @@ except Exception:  # pragma: no cover - optional
 logger = logging.getLogger(__name__)
 
 
+def ensure_fresh_output_dir(output_dir: str) -> None:
+    """Create ``output_dir``, failing if it already exists.
+
+    This is used by experiment entry points to avoid accidentally
+    overwriting existing results in a previously used directory.
+    """
+
+    if os.path.exists(output_dir):
+        raise FileExistsError(
+            f"Output directory already exists: {output_dir!r}. "
+            "Refuse to overwrite existing results."
+        )
+
+    os.makedirs(output_dir, exist_ok=False)
+
+
 def _sanitize_for_parquet(df: pd.DataFrame) -> pd.DataFrame:
     """Return a copy of ``df`` that is safe to write with pyarrow.
 
@@ -47,11 +63,40 @@ def _sanitize_for_parquet(df: pd.DataFrame) -> pd.DataFrame:
     # Otherwise, convert to JSON strings for robust parquet serialization.
     new_df = df.copy()
     new_df["transformation_params"] = series.apply(
-        lambda v: json.dumps(v)
-        if isinstance(v, dict)
-        else ("null" if v is None else str(v))
+        lambda v: (
+            json.dumps(v) if isinstance(v, dict) else ("null" if v is None else str(v))
+        )
     )
     return new_df
+
+
+def _write_table_single_format(
+    df: pd.DataFrame,
+    base_path: str,
+    file_format: str,
+) -> None:
+    """Write a single non-empty DataFrame to disk in the requested format.
+
+    ``base_path`` is the path without file extension; ``file_format`` is
+    either ``"parquet"`` or ``"jsonl"``.
+    """
+
+    if df.empty:
+        return
+
+    if file_format == "parquet":
+        df = _sanitize_for_parquet(df)
+        path = base_path + ".parquet"
+        df.to_parquet(path)
+        logger.info("save_results parquet path=%s rows=%d", path, len(df))
+    elif file_format == "jsonl":
+        path = base_path + ".jsonl"
+        df.to_json(path, orient="records", lines=True)
+        logger.info("save_results jsonl path=%s rows=%d", path, len(df))
+    else:
+        raise ValueError(
+            f"Unsupported results file format: {file_format!r} (expected 'parquet' or 'jsonl')"
+        )
 
 
 def save_results(
@@ -61,18 +106,20 @@ def save_results(
     scores_df: pd.DataFrame,
     d_within_df: pd.DataFrame,
     baseline_vs_trans_df: pd.DataFrame,
+    results_file_format: str = "jsonl",
 ) -> None:
     """Save configuration and result tables to ``output_dir``.
 
     Files written (all optional based on non-emptiness of the inputs):
 
     - ``config.json``: JSON-serialized ``asdict(config)`` if possible.
-    - ``traces.parquet`` / ``scores.parquet``: raw trace/score tables.
-    - ``metrics_within.parquet``: within-context disagreement metrics.
-    - ``metrics_baseline_vs_trans.parquet``: baseline vs transformed KL.
+    - ``traces.parquet`` / ``scores.parquet`` or ``traces.jsonl`` /
+      ``scores.jsonl``: raw trace/score tables.
+    - ``metrics_within.parquet`` / ``metrics_within.jsonl``: within-context
+      disagreement metrics.
+    - ``metrics_baseline_vs_trans.parquet`` /
+      ``metrics_baseline_vs_trans.jsonl``: baseline vs transformed KL.
     """
-
-    os.makedirs(output_dir, exist_ok=True)
 
     logger.info("save_results output_dir=%s", output_dir)
 
@@ -109,31 +156,29 @@ def save_results(
     )
 
     if not trace_df.empty:
-        trace_df = _sanitize_for_parquet(trace_df)
-        trace_path = os.path.join(output_dir, "traces.parquet")
-        trace_df.to_parquet(trace_path)
-        logger.info("save_results traces path=%s rows=%d", trace_path, len(trace_df))
+        _write_table_single_format(
+            trace_df,
+            os.path.join(output_dir, "traces"),
+            results_file_format,
+        )
 
     if not scores_df.empty:
-        scores_df = _sanitize_for_parquet(scores_df)
-        scores_path = os.path.join(output_dir, "scores.parquet")
-        scores_df.to_parquet(scores_path)
-        logger.info("save_results scores path=%s rows=%d", scores_path, len(scores_df))
+        _write_table_single_format(
+            scores_df,
+            os.path.join(output_dir, "scores"),
+            results_file_format,
+        )
 
     if not d_within_df.empty:
-        d_within_df = _sanitize_for_parquet(d_within_df)
-        within_path = os.path.join(output_dir, "metrics_within.parquet")
-        d_within_df.to_parquet(within_path)
-        logger.info(
-            "save_results metrics_within path=%s rows=%d", within_path, len(d_within_df)
+        _write_table_single_format(
+            d_within_df,
+            os.path.join(output_dir, "metrics_within"),
+            results_file_format,
         )
 
     if not baseline_vs_trans_df.empty:
-        baseline_vs_trans_df = _sanitize_for_parquet(baseline_vs_trans_df)
-        baseline_path = os.path.join(output_dir, "metrics_baseline_vs_trans.parquet")
-        baseline_vs_trans_df.to_parquet(baseline_path)
-        logger.info(
-            "save_results metrics_baseline_vs_trans path=%s rows=%d",
-            baseline_path,
-            len(baseline_vs_trans_df),
+        _write_table_single_format(
+            baseline_vs_trans_df,
+            os.path.join(output_dir, "metrics_baseline_vs_trans"),
+            results_file_format,
         )
