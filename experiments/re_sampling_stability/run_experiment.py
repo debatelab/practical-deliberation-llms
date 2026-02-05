@@ -62,6 +62,9 @@ from practical_deliberation_llms.plotting import plot_results
 
 from .config import CLIConfig, ExperimentConfig, build_config_from_cli
 
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
