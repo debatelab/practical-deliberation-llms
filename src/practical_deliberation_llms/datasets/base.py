@@ -38,12 +38,18 @@ class DatasetAdapter(ABC):
     def load(self) -> pd.DataFrame:
         """Return the normalized dataset as a DataFrame.
 
-        Expected columns:
+        Expected columns in the returned DataFrame:
 
         - `decision_situation`: str
         - `actions`: list[str]
         - `metadata`: dict
-        - `problem_uid`: str (optional, will be set if missing)
+        - `problem_uid`: str (optional)
+
+        Adapters may omit `problem_uid`; downstream helpers such as
+        :func:`make_problem_from_row` will synthesize a deterministic
+        identifier when it is missing. Implementations are encouraged to
+        provide a stable `problem_uid` where convenient, but are not
+        required to do so.
         """
 
 
@@ -55,12 +61,16 @@ def make_problem_from_row(row: pd.Series) -> PracticalProblem:
     - `decision_situation`: str
     - `actions`: list[str]
     - `metadata`: dict
-    - `problem_uid`: str (optional, will be set deterministically if missing)
+    - `problem_uid`: str (optional)
 
     The function attaches metadata fields to the returned `PracticalProblem`
     instance. These fields line up with the extended dataclass fields defined
     in `model.PracticalProblem`, but we use `setattr` to remain robust while
     the dataclass is being evolved.
+
+    If `problem_uid` is absent, this function synthesizes a deterministic
+    identifier based on `metadata['source_dataset']` and
+    `metadata['source_id']` (or the row index as a fallback).
 
     Semantics of identifiers used in experiments
     -------------------------------------------

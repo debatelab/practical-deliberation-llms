@@ -152,8 +152,9 @@ def extract_label_from_json(json_str: str) -> str | None:
     """Parse a label value from a JSON-like string.
 
     The function tries ``json.loads`` first and falls back to a simple
-    regex that searches for a ``"label"`` field. On any failure, it
-    returns ``None`` instead of raising.
+    regex that searches for the field named by ``LABEL_FIELD_NAME``
+    (currently ``"label"``). On any failure, it returns ``None`` instead
+    of raising.
     """
 
     if not json_str:
