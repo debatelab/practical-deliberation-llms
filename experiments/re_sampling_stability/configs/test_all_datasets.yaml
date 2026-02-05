@@ -5,14 +5,23 @@ datasets:
   - name: "daily_dilemmas"
     n_problems: 4
     adapter_kwargs: {}
-
-  # Example: include Multi-step Moral Dilemmas (MMDs) as an additional source.
-  #
-  # - name: "MSMDilemmas"
-  #   n_problems: 4
-  #   adapter_kwargs:
-  #     framework: "MFT"    # or "Schwartz" or "default"
-
+  - name: "MSMDilemmas"
+    n_problems: 4
+    adapter_kwargs:
+      framework: "default" # or "Schwartz" or "MFT"
+  - name: "AITA"
+    n_problems: 4
+    adapter_kwargs: {}
+  - name: "RoleConflictBench"
+    n_problems: 4
+    adapter_kwargs:
+      name: "default"
+      split: "train"
+  - name: AIRiskDilemmas
+    n_problems: 4
+    adapter_kwargs:
+      subset: model_eval
+      split: test
 n_traces_per_problem: 2
 temperature: 0.7
 top_p: 0.95
