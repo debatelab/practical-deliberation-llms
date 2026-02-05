@@ -6,40 +6,33 @@ project and in the Colab notebook, including:
 - Converting token-level logprobs into label-level probabilities.
 - Parsing `<think>...</think>` fences and JSON label answers.
 - Computing KL divergence and within-context disagreement metrics.
-
-Backward compatibility
-----------------------
-
-The function ``get_labelprobs_from_message`` is kept for compatibility
-with older LangChain-based notebooks. Its implementation is now a thin
-wrapper around the more general ``logprobs_to_label_probs`` helper.
 """
 
 from __future__ import annotations
 
-import copy
 import json
 import logging
 import re
 from typing import Any, Dict, Iterable, List, Tuple
 
 import numpy as np
-from langchain_core.messages import AIMessage
+from openai.types.chat.chat_completion_token_logprob import TopLogprob
 
 
 logger = logging.getLogger(__name__)
 
 
 def logprobs_to_label_probs(
-    logprob_records: Iterable[Dict[str, Any]], labels: List[str]
+    logprob_records: Iterable[TopLogprob], labels: List[str]
 ) -> Dict[str, float]:
-    """Convert token-level logprobs to a label→probability mapping.
+    """Convert token-level logprobs to a label->probability mapping.
 
     Parameters
     ----------
     logprob_records:
-        Iterable of dicts with at least ``"token"`` and ``"logprob"`` keys,
-        as returned by vLLM/OpenAI-style ``top_logprobs``.
+        Iterable of OpenAI ``TopLogprob`` objects for a single token
+        position, as returned by ``chat.completions`` with
+        ``logprobs=True``.
     labels:
         Candidate label strings (e.g. ``["a", "b"]``) that we want to
         assign probabilities to.
@@ -56,63 +49,48 @@ def logprobs_to_label_probs(
     if not records or not labels:
         return {label: 0.0 for label in labels}
 
-    # Assign labels to records, preferring exact token matches (after
-    # stripping quotes and whitespace) and falling back to substring
-    # matching to remain robust across tokenizers.
     lower_labels = [l.lower() for l in labels]
-    for record in records:
-        raw_token = str(record.get("token", ""))
+
+    # We keep an intermediate mutable representation annotated with
+    # inferred label and probability for clarity when aggregating.
+    enriched: List[Dict[str, Any]] = []
+    for rec in records:
+        raw_token = rec.token
         token_stripped = raw_token.strip().strip('"').lower()
 
         # First pass: exact match against labels.
         exact_matches = [l for l in lower_labels if token_stripped == l]
         if len(exact_matches) == 1:
-            record["label"] = labels[lower_labels.index(exact_matches[0])]
-            continue
-
-        # Second pass: substring match, mirroring original logic.
-        token_lower = raw_token.lower()
-        substring_matches = [l for l in lower_labels if l in token_lower]
-        if len(substring_matches) == 1:
-            record["label"] = labels[lower_labels.index(substring_matches[0])]
+            label = labels[lower_labels.index(exact_matches[0])]
         else:
-            record["label"] = None
+            # Second pass: substring match, mirroring original logic.
+            token_lower = raw_token.lower()
+            substring_matches = [l for l in lower_labels if l in token_lower]
+            if len(substring_matches) == 1:
+                label = labels[lower_labels.index(substring_matches[0])]
+            else:
+                label = None
 
-    logprobs = np.array([float(rec["logprob"]) for rec in records], dtype=float)
+        enriched.append(
+            {"token": raw_token, "logprob": float(rec.logprob), "label": label}
+        )
+
+    logprobs = np.array([float(rec["logprob"]) for rec in enriched], dtype=float)
     # Numerically stable softmax.
     max_lp = np.max(logprobs)
     probs = np.exp(logprobs - max_lp)
     probs = probs / probs.sum()
 
-    for rec, prob in zip(records, probs):
+    for rec, prob in zip(enriched, probs):
         rec["prob"] = float(prob)
 
     label_probs: Dict[str, float] = {label: 0.0 for label in labels}
-    for rec in records:
-        label = rec.get("label")
+    for rec in enriched:
+        label = rec["label"]
         if label in label_probs:
             label_probs[label] += float(rec["prob"])
 
     return label_probs
-
-
-def get_labelprobs_from_message(
-    result_obj: AIMessage, labels: List[str] | None = None
-) -> Dict[str, float]:
-    """Extract label probabilities from a LangChain ``AIMessage``.
-
-    This function preserves the public signature and high-level
-    behaviour used in earlier notebooks while delegating the core logic
-    to :func:`logprobs_to_label_probs`.
-    """
-
-    if labels is None:
-        labels = ["a", "b"]
-
-    first_logprobs = copy.copy(
-        result_obj.response_metadata["logprobs"]["content"][0]["top_logprobs"]
-    )
-    return logprobs_to_label_probs(first_logprobs, labels)
 
 
 THINK_REGEX = re.compile(r"<think>([\s\S]*?)</think>", re.IGNORECASE)
