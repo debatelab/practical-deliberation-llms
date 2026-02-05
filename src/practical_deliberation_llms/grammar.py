@@ -19,6 +19,8 @@ from typing import Dict, List
 
 import json
 
+from .formats import LABEL_FIELD_NAME, make_label_json_schema
+
 
 def make_structured_label_grammar(
     reasoning: str, labels: List[str]
@@ -53,17 +55,7 @@ def make_structured_label_grammar(
                 },
                 {
                     "type": "json_schema",
-                    "json_schema": {
-                        "type": "object",
-                        "properties": {
-                            "label": {
-                                "type": "string",
-                                "enum": labels,
-                            },
-                        },
-                        "required": ["label"],
-                        "additionalProperties": False,
-                    },
+                    "json_schema": make_label_json_schema(labels),
                 },
             ],
         },

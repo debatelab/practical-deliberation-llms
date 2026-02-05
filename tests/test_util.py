@@ -5,7 +5,10 @@ import numpy as np
 import pytest
 from openai.types.chat.chat_completion_token_logprob import TopLogprob
 
+from practical_deliberation_llms.formats import LABEL_FIELD_NAME
 from practical_deliberation_llms.util import (
+    LABEL_JSON_REGEX,
+    LABEL_PREFIX_REGEX,
     extract_label_from_json,
     kl_divergence,
     logprobs_to_label_probs,
@@ -91,6 +94,37 @@ def test_parse_think_and_label_and_extract_label_from_json():
 
     label = extract_label_from_json(label_json)
     assert label == "b"
+
+
+def test_label_schema_and_parsers_consistency_across_formats():
+    # JSON variants that should all be acceptable according to the
+    # label-object schema and therefore be parsed correctly by the
+    # regex-based helpers.
+    values = ["a", "b"]
+    base = LABEL_FIELD_NAME
+    variants = [
+        f'{{"{base}": "{values[0]}"}}',
+        f'{{ "{base}":"{values[0]}" }}',
+        "{\n  " + f'"{base}": "{values[0]}"' + "\n}",
+    ]
+
+    for json_str in variants:
+        # LABEL_JSON_REGEX should match the full object.
+        match = LABEL_JSON_REGEX.search(json_str)
+        assert match is not None
+        assert match.group(0) == json_str
+
+        # LABEL_PREFIX_REGEX should match a prefix containing the
+        # field name and the opening quote of the value.
+        prefix_match = LABEL_PREFIX_REGEX.search(json_str)
+        assert prefix_match is not None
+        # The prefix ends just after the opening quote of the value.
+        prefix = prefix_match.group(0)
+        assert prefix.endswith('"')
+
+        # extract_label_from_json should recover the value.
+        label = extract_label_from_json(json_str)
+        assert label == values[0]
 
 
 def test_kl_divergence_identical_non_normalized_is_zero():

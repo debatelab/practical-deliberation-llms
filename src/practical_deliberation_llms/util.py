@@ -18,6 +18,8 @@ from typing import Any, Dict, Iterable, List, Tuple
 import numpy as np
 from openai.types.chat.chat_completion_token_logprob import TopLogprob
 
+from .formats import LABEL_FIELD_NAME
+
 logger = logging.getLogger(__name__)
 
 
@@ -95,7 +97,20 @@ def logprobs_to_label_probs(
 
 
 THINK_REGEX = re.compile(r"<think>([\s\S]*?)</think>", re.IGNORECASE)
-LABEL_JSON_REGEX = re.compile(r"\{[\s\S]*?\"label\"[\s\S]*?\}")
+LABEL_JSON_REGEX = re.compile(
+    rf"\{{[\s\S]*?\"{re.escape(LABEL_FIELD_NAME)}\"[\s\S]*?\}}"
+)
+# Prefix pattern for a JSON object conforming to the label schema defined
+# in ``formats.make_label_json_schema``. The regex matches from the
+# opening brace up to and including the opening quote of the
+# LABEL_FIELD_NAME value.
+LABEL_PREFIX_REGEX = re.compile(rf"\{{\s*\"{re.escape(LABEL_FIELD_NAME)}\"\s*:\s*\"")
+# Prefix pattern for a JSON object containing a label field, up to and
+# including the opening quote for the label value. This is kept
+# separate from LABEL_JSON_REGEX because callers like
+# ``score_label_given_trace`` only care about the point where the label
+# value begins, not the entire JSON object.
+LABEL_PREFIX_REGEX = re.compile(r"\{\s*\"label\"\s*:\s*\"")
 
 
 def parse_think_and_label(text: str | None) -> Tuple[str | None, str | None]:
@@ -157,8 +172,10 @@ def extract_label_from_json(json_str: str) -> str | None:
     except json.JSONDecodeError:
         logger.debug("extract_label_from_json json_decode_error")
 
-    # Fallback: regex the label out of the string.
-    match = re.search(r"\"label\"\s*:\s*\"(.*?)\"", json_str)
+    # Fallback: regex the label out of the string, assuming the same
+    # field name as used in the schema.
+    pattern = rf"\"{re.escape(LABEL_FIELD_NAME)}\"\s*:\s*\"(.*?)\""
+    match = re.search(pattern, json_str)
     if match:
         return match.group(1)
 
