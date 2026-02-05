@@ -2,6 +2,7 @@
 
 import dataclasses
 from operator import itemgetter
+from typing import Any
 
 
 @dataclasses.dataclass
@@ -17,9 +18,9 @@ class PracticalProblem:
       automatically in ``__post_init__``.
 
     In experiment code (e.g. under ``experiments/re_sampling_stability``),
-    additional attributes are attached dynamically using ``setattr`` to avoid
-    over-constraining the dataclass while the schema is still evolving. The
-    most important of these are:
+    additional attributes are populated by dataset adapters and
+    transformation utilities. These are represented here as optional fields
+    so that static type checkers can reason about them:
 
     - ``problem_uid``: identifier of this *specific* problem instance as it
       appears in an experiment run (e.g. ``"daily_dilemmas::42"`` or
@@ -33,15 +34,19 @@ class PracticalProblem:
       ``"reverse_options"``).
     - ``source_dataset`` / ``source_id`` / ``metadata``: provenance
       information attached by dataset adapters.
-
-    Callers should treat these dynamic attributes as part of the informal
-    schema used by experiment scripts and metrics, but not as a stable public
-    API yet.
     """
 
     decision_situation: str
     actions: list[str]
     labels: list[str] | None = None
+    # Optional metadata / provenance fields attached during experiments.
+    problem_uid: str | None = None
+    base_problem_uid: str | None = None
+    transformation_type: str | None = None
+    transformation_params: dict[str, Any] | None = None
+    source_dataset: str | None = None
+    source_id: str | None = None
+    metadata: dict[str, Any] | None = None
 
     def __post_init__(self):
         if self.labels is None:
