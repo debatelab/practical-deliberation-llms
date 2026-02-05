@@ -58,13 +58,13 @@ def logprobs_to_label_probs(
         token_stripped = raw_token.strip().strip('"').lower()
 
         # First pass: exact match against labels.
-        exact_matches = [l for l in lower_labels if token_stripped == l]
+        exact_matches = [label for label in lower_labels if token_stripped == l]
         if len(exact_matches) == 1:
             label = labels[lower_labels.index(exact_matches[0])]
         else:
             # Second pass: substring match, mirroring original logic.
             token_lower = raw_token.lower()
-            substring_matches = [l for l in lower_labels if l in token_lower]
+            substring_matches = [label for label in lower_labels if l in token_lower]
             if len(substring_matches) == 1:
                 label = labels[lower_labels.index(substring_matches[0])]
             else:
