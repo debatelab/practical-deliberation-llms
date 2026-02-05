@@ -18,7 +18,6 @@ from typing import Any, Dict, Iterable, List, Tuple
 import numpy as np
 from openai.types.chat.chat_completion_token_logprob import TopLogprob
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -97,7 +96,7 @@ THINK_REGEX = re.compile(r"<think>([\s\S]*?)</think>", re.IGNORECASE)
 LABEL_JSON_REGEX = re.compile(r"\{[\s\S]*?\"label\"[\s\S]*?\}")
 
 
-def parse_think_and_label(text: str) -> Tuple[str | None, str | None]:
+def parse_think_and_label(text: str | None) -> Tuple[str | None, str | None]:
     """Extract `<think>...</think>` content and a JSON-like label snippet.
 
     Returns a pair ``(think_text, label_json_str)``, where either element
@@ -105,6 +104,9 @@ def parse_think_and_label(text: str) -> Tuple[str | None, str | None]:
     the *last* occurrence is returned, which matches the notebook
     behaviour of using the most recent answer.
     """
+
+    if text is None:
+        return None, None
 
     think_matches = list(THINK_REGEX.finditer(text))
     think_text: str | None
