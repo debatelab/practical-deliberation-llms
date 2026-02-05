@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -29,8 +28,8 @@ def plot_results(
     logger.info("plot_results output_dir=%s", output_dir)
 
     if not d_within_df.empty and "D_within" in d_within_df.columns:
-        plt.figure(figsize=(6, 4))
-        sns.histplot(d_within_df["D_within"], bins=30, kde=True)
+        plt.figure(figsize=(10, 6))
+        sns.histplot(d_within_df["D_within"], hue="source_dataset", bins=30, kde=True)
         plt.title("Within-context disagreement (D_within)")
         plt.xlabel("D_within")
         plt.tight_layout()
