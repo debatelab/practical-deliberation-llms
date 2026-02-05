@@ -30,14 +30,15 @@ experiment config for easier downstream analysis.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List
 
-import logging
 from jinja2 import Template
+from openai.types.chat import ChatCompletionMessageParam
 
 from practical_deliberation_llms.inference import InferenceClient
-from .reasoning import SYSTEM_PROMPT_TEMPLATE, USER_PROMPT_TEMPLATE
 
+from .reasoning import SYSTEM_PROMPT_TEMPLATE, USER_PROMPT_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ async def score_choice_labels_for_trace(
         labeled_actions=labeled_actions,
     )
 
-    context_messages = [
+    context_messages: list[ChatCompletionMessageParam] = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]

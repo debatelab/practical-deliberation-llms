@@ -3,28 +3,28 @@
 This module provides the `InferenceClient` used in the Colab notebook to:
 
 - Generate reasoning traces and JSON label answers via `chat.completions`.
-- Score labels given a fixed reasoning trace via `completions` with logprobs.
+- Score labels given a fixed reasoning trace via `chat.completions` with logprobs.
 
-NOTE/TODO: The project has standardized on the chat API (`/v1/chat/completions`).
-`score_label_given_trace` still uses the legacy `/v1/completions` endpoint and
-should be adapted to use `chat.completions` (with logprobs) once the scoring
-pipeline is updated accordingly.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List
 
-import logging
 from openai import OpenAI
+from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
+from openai.types.chat.chat_completion_token_logprob import (
+    ChatCompletionTokenLogprob,
+    TopLogprob,
+)
 
 from .grammar import make_structured_label_grammar
 from .util import (
+    extract_label_from_json,
     logprobs_to_label_probs,
     parse_think_and_label,
-    extract_label_from_json,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ class InferenceClient:
         - `label`: parsed `label` value (or `None` on failure)
         """
 
-        messages = [
+        messages: list[ChatCompletionMessageParam] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
@@ -78,7 +78,7 @@ class InferenceClient:
             seed,
         )
 
-        response = self.client.chat.completions.create(
+        response: ChatCompletion = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
             temperature=temperature,
@@ -114,7 +114,7 @@ class InferenceClient:
 
     def score_label_given_trace(
         self,
-        context_messages: List[dict],
+        context_messages: list[ChatCompletionMessageParam],
         reasoning: str,
         labels: List[str],
     ) -> Dict[str, float]:
@@ -146,7 +146,7 @@ class InferenceClient:
         # a bit to avoid truncation.
         max_tokens = max(len(reasoning) // 2 + 32, 64)
 
-        response = self.client.chat.completions.create(
+        response: ChatCompletion = self.client.chat.completions.create(
             model=self.model,
             messages=context_messages,
             temperature=0.0,
@@ -166,18 +166,18 @@ class InferenceClient:
             logger.warning("score_label_given_trace missing_logprobs choice=%s", choice)
             return {label: 0.0 for label in labels}
 
-        # vLLM chat logprobs format: logprobs.content is a list of
-        # per-token entries, each with .top_logprobs containing token
-        # logprob records. We reconstruct the generated text incrementally
-        # and locate the step where the label value begins.
-        content_entries = message_logprobs.content
+        # Chat logprobs format: logprobs.content is a list of
+        # per-token entries, each with ``.top_logprobs`` containing
+        # `TopLogprob` records. We reconstruct the generated text
+        # incrementally and locate the step where the label value begins.
+        content_entries: List[ChatCompletionTokenLogprob] = message_logprobs.content
         logger.debug("score_label_given_trace logprobs_content=%s", content_entries)
         accum = ""
         label_prefix = '{"label": "'
-        step_label_start = None
+        step_label_start: int | None = None
 
         for idx, entry in enumerate(content_entries):
-            token = entry.token  # type: ignore[attr-defined]
+            token: str = entry.token
             accum += token
             if accum.endswith(label_prefix):
                 step_label_start = idx + 1
@@ -191,7 +191,8 @@ class InferenceClient:
             )
             return {label: 0.0 for label in labels}
 
-        top_logprobs_step = content_entries[step_label_start].top_logprobs  # type: ignore[attr-defined]
+        token_step: ChatCompletionTokenLogprob = content_entries[step_label_start]
+        top_logprobs_step: List[TopLogprob] = token_step.top_logprobs
         label_probs = logprobs_to_label_probs(top_logprobs_step, labels)
 
         logger.debug("score_label_given_trace label_probs=%s", label_probs)
