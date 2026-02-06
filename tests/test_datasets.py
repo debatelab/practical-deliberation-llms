@@ -3,6 +3,9 @@ from practical_deliberation_llms.datasets import (
     load_normalized_dataset,
     sample_problems,
 )
+from practical_deliberation_llms.datasets.legalbench_corporate_lobbying import (
+    LegalBenchCorporateLobbyingAdapter,
+)
 from practical_deliberation_llms.model import PracticalProblem
 
 
@@ -308,3 +311,69 @@ def test_airisk_dilemmas_adapter_basic_integration() -> None:
         assert p.source_dataset == "AIRiskDilemmas"
         assert isinstance(p.problem_uid, str)
         assert p.problem_uid.startswith("airisk::model_eval::")
+
+
+def test_legalbench_corporate_lobbying_integration() -> None:
+    """Integration checks for the legalbench corporate lobbying adapter.
+
+    This test is stronger and more deterministic now that the adapter
+    consistently uses the `use_likert` kwarg.
+
+    - Verifies adapter registration and normalized DataFrame shape.
+    - Asserts canonical Likert actions in default mode.
+    - Asserts binary actions when `use_likert=False` is passed.
+    """
+
+    assert "legalbench_corporate_lobbying" in ADAPTER_REGISTRY
+
+    # Load normalized DataFrame (may download from HF); skip if empty to avoid
+    # flaky failures in offline CI environments or when the adapter filters all rows.
+    df = load_normalized_dataset(
+        "legalbench_corporate_lobbying",
+        adapter_kwargs={"split": "test"},
+    )
+
+    assert not df.empty, "legalbench normalized dataset must not be empty"
+
+    # Basic normalized columns
+    for col in ("decision_situation", "actions", "metadata", "problem_uid"):
+        assert col in df.columns
+
+    first = df.iloc[0]
+    assert isinstance(first["decision_situation"], str)
+    assert "Answer by only replying to Yes or No." not in first["decision_situation"]
+    assert isinstance(first["actions"], list) and first["actions"]
+    assert isinstance(first["metadata"], dict)
+    assert first["metadata"].get("source_dataset") == "legalbench_corporate_lobbying"
+    assert isinstance(first["problem_uid"], str)
+    assert first["problem_uid"].startswith("legalbench_corporate_lobbying::")
+
+    # End-to-end via sample_problems: default should produce the canonical Likert
+    n = 3
+    problems = sample_problems(
+        dataset_name="legalbench_corporate_lobbying",
+        n_problems=n,
+        seed=0,
+        adapter_kwargs={"split": "test"},
+    )
+    assert len(problems) == n
+
+    for p in problems:
+        _assert_problem_basic_shape(p)
+        # With the kwarg naming fixed, default mode must equal the canonical Likert
+        assert p.actions == LegalBenchCorporateLobbyingAdapter.CANONICAL_LIKERT
+        assert p.source_dataset == "legalbench_corporate_lobbying"
+
+    # Binary mode: pass use_likert=False to obtain YES/NO actions
+    problems_bin = sample_problems(
+        dataset_name="legalbench_corporate_lobbying",
+        n_problems=3,
+        seed=1,
+        adapter_kwargs={"split": "test", "use_likert": False},
+    )
+    assert len(problems_bin) == 3
+    for p in problems_bin:
+        _assert_problem_basic_shape(p)
+        assert "Answer by only replying to Yes or No." not in p.decision_situation
+        assert p.actions == ["YES", "NO"]
+        assert p.source_dataset == "legalbench_corporate_lobbying"

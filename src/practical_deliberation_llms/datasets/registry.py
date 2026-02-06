@@ -4,13 +4,16 @@ from typing import Any, Dict, Type
 
 import pandas as pd
 
+from .airisk_dilemmas import AIRiskDilemmasAdapter
+from .aita import AITAAdapter
 from .base import DatasetAdapter
 from .daily_dilemmas import DailyDilemmasAdapter
-from .aita import AITAAdapter
-from .role_conflict_bench import RoleConflictBenchAdapter
-from .airisk_dilemmas import AIRiskDilemmasAdapter
+from .legalbench_corporate_lobbying import LegalBenchCorporateLobbyingAdapter
+from .legalbench_insurance_policy_interpretation import (
+    LegalBenchInsurancePolicyInterpretationAdapter,
+)
 from .multi_step_moral_dilemmas import MultiStepMoralDilemmasAdapter
-
+from .role_conflict_bench import RoleConflictBenchAdapter
 
 ADAPTER_REGISTRY: Dict[str, Type[DatasetAdapter]] = {
     "daily_dilemmas": DailyDilemmasAdapter,
@@ -18,6 +21,8 @@ ADAPTER_REGISTRY: Dict[str, Type[DatasetAdapter]] = {
     "RoleConflictBench": RoleConflictBenchAdapter,
     "AIRiskDilemmas": AIRiskDilemmasAdapter,
     "MSMDilemmas": MultiStepMoralDilemmasAdapter,
+    "legalbench_corporate_lobbying": LegalBenchCorporateLobbyingAdapter,
+    "legalbench_insurance_policy_interpretation": LegalBenchInsurancePolicyInterpretationAdapter,
 }
 
 
