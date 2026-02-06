@@ -55,7 +55,11 @@ def plot_results(
         and "D_KL_base_to_trans" in baseline_vs_trans_df.columns
     ):
         plt.figure(figsize=(6, 4))
-        sns.histplot(baseline_vs_trans_df["D_KL_base_to_trans"], bins=10, kde=True)
+        sns.histplot(
+            baseline_vs_trans_df["D_KL_base_to_trans"],  # type: ignore
+            bins=10,
+            kde=True,
+        )
         plt.title("KL divergence between baseline and transformed variants")
         plt.xlabel("D_KL_base_to_trans")
         plt.tight_layout()
