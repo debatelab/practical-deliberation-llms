@@ -32,8 +32,10 @@ def plot_results(
         histplot_kwargs = {
             "data": d_within_df,
             "x": "D_within",
-            "bins": 30,
-            "kde": True,
+            "bins": 12,
+            "element": "step",
+            "stat": "density",
+            "common_norm": False,
         }
         if "source_dataset" in d_within_df.columns:
             histplot_kwargs["hue"] = "source_dataset"
