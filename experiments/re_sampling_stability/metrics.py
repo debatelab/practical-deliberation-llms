@@ -11,14 +11,13 @@ This module mirrors the analysis steps from the draft notebook:
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Iterable, List, Tuple
 
-import logging
 import numpy as np
 import pandas as pd
 
 from practical_deliberation_llms.util import kl_divergence, within_context_disagreement
-
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +149,7 @@ def compute_metrics(
         if mean_vec.sum() > 0:
             mean_vec = mean_vec / mean_vec.sum()
 
-        record: Dict[str, Any] = {
+        record = {
             "problem_uid": problem_uid,
             "Q_bar": mean_vec,
         }
