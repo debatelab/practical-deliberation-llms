@@ -28,25 +28,21 @@ def plot_results(
     logger.info("plot_results output_dir=%s", output_dir)
 
     if not d_within_df.empty and "jsd_information_radius" in d_within_df.columns:
-        plt.figure(figsize=(10, 6))
-        histplot_kwargs = {
+        plt.figure(figsize=(10, 0.7 * d_within_df["source_dataset"].nunique()))
+        boxplot_kwargs = {
             "data": d_within_df,
             "x": "jsd_information_radius",
-            "bins": 12,
-            "element": "step",
-            "stat": "density",
-            "common_norm": False,
         }
         if "source_dataset" in d_within_df.columns:
-            histplot_kwargs["hue"] = "source_dataset"
-        sns.histplot(**histplot_kwargs)
+            boxplot_kwargs["y"] = "source_dataset"
+        sns.boxplot(**boxplot_kwargs)
         plt.title("Within-context JSD information radius")
         plt.xlabel("jsd_information_radius")
         plt.tight_layout()
-        within_path = os.path.join(output_dir, "jsd_information_radius_hist.png")
+        within_path = os.path.join(output_dir, "jsd_information_radius_boxplot.png")
         plt.savefig(within_path)
         plt.close()
-        logger.info("plot_results jsd_information_radius_hist path=%s", within_path)
+        logger.info("plot_results jsd_information_radius_boxplot path=%s", within_path)
     else:
         logger.warning("plot_results skipping_within_plot empty_or_missing_column")
 
