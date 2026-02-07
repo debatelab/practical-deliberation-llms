@@ -7,7 +7,7 @@ from practical_deliberation_llms.datasets.legalbench_corporate_lobbying import (
 )
 
 
-def test_use_likert_default_trims_instruction_and_uses_likert():
+def test_use_ambiguous_default_trims_instruction_and_uses_ambiguous():
     # Inputs end with the exact Yes/No instruction sentence -> should be removed
     df = pd.DataFrame(
         [
@@ -29,13 +29,13 @@ def test_use_likert_default_trims_instruction_and_uses_likert():
     # The trailing instruction is removed
     assert row["decision_situation"] == "Answer. A short scenario about lobbying."
     # Default behavior (current code) uses the canonical Likert scale
-    assert row["actions"] == LegalBenchCorporateLobbyingAdapter.CANONICAL_LIKERT
+    assert row["actions"] == LegalBenchCorporateLobbyingAdapter.CANONICAL_AMBIGUOUS
     # Raw GT preserved in metadata
     assert row["metadata"]["gt_raw"] == "Yes"
 
 
-def test_use_likert_false_produces_binary_choice():
-    # Note: the adapter currently reads the adapter keyword 'use_likert' (typo)
+def test_use_ambiguous_false_produces_binary_choice():
+    # Note: the adapter currently reads the adapter keyword 'use_ambiguous' (typo)
     # to determine binary vs likert behavior. Tests reflect the current logic.
     df = pd.DataFrame(
         [
@@ -47,10 +47,10 @@ def test_use_likert_false_produces_binary_choice():
         ]
     )
 
-    # Pass the actual key the adapter reads ('use_likert') to disable Likert
+    # Pass the actual key the adapter reads ('use_ambiguous') to disable Ambiguity option
     adapter = LegalBenchCorporateLobbyingAdapter(
         dataset_name="legalbench_corporate_lobbying",
-        use_likert=False,
+        use_ambiguous=False,
     )
     out = adapter.normalize_dataframe(df)
 
