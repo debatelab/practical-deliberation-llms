@@ -58,7 +58,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
 from practical_deliberation_llms.datasets import sample_problems
-from practical_deliberation_llms.inference import InferenceClient
+from practical_deliberation_llms.inference import InferenceClient, InferenceError
 from practical_deliberation_llms.io import ensure_fresh_output_dir, save_results
 from practical_deliberation_llms.plotting import plot_results
 
@@ -341,6 +341,14 @@ async def run_experiment_async(
                     inference_client,
                     problem,
                 )
+            except InferenceError as exc:
+                logger.warning(
+                    "Reasoning inference_error; skipping problem_idx=%d problem_uid=%s error=%r",
+                    idx,
+                    getattr(problem, "problem_uid", None),
+                    exc,
+                )
+                return []
             except Exception:  # pragma: no cover - defensive logging, re-raise
                 logger.exception(
                     "Reasoning failed for problem_idx=%d problem_uid=%s",
@@ -396,6 +404,15 @@ async def run_experiment_async(
                     inference_client,
                     trace,
                 )
+            except InferenceError as exc:
+                logger.warning(
+                    "Scoring inference_error; skipping trace_idx=%d trace_id=%s problem_uid=%s error=%r",
+                    idx,
+                    trace.get("trace_id"),
+                    trace.get("problem_uid"),
+                    exc,
+                )
+                return []
             except Exception:  # pragma: no cover - defensive logging, re-raise
                 logger.exception(
                     "Scoring failed for trace_idx=%d trace_id=%s problem_uid=%s",

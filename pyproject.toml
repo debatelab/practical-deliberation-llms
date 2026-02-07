@@ -19,6 +19,7 @@ dependencies = [
     "openinference-instrumentation-langchain>=0.1.29",
     "pyyaml>=6.0.2",
     "seaborn>=0.13.2",
+    "tenacity>=9.0.0",
 ]
 
 [project.scripts]

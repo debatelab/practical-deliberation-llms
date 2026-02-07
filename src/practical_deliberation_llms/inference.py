@@ -12,14 +12,20 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List
 
-from openai import AsyncOpenAI
+from openai import APITimeoutError, AsyncOpenAI, OpenAIError
 from openai.types.chat import ChatCompletion, ChatCompletionMessageParam
 from openai.types.chat.chat_completion_token_logprob import (
     ChatCompletionTokenLogprob,
     TopLogprob,
 )
+from tenacity import (  # type: ignore
+    AsyncRetrying,
+    RetryError,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
-from .formats import LABEL_FIELD_NAME
 from .grammar import make_structured_label_grammar
 from .util import (
     LABEL_PREFIX_REGEX,
@@ -29,6 +35,10 @@ from .util import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class InferenceError(Exception):
+    """Raised when inference fails after retries or with a non-retryable error."""
 
 
 class InferenceClient:
@@ -44,6 +54,67 @@ class InferenceClient:
     def __init__(self, client: AsyncOpenAI, model: str):
         self.client = client
         self.model = model
+        # Retry configuration is intentionally conservative and can be
+        # revisited once we have more experience with typical failure
+        # modes across backends.
+        self._max_retries = 3
+        self._retry_base_delay = 0.5
+        self._retry_max_delay = 10.0
+        # Per-request timeout in seconds. This bounds the wall-clock time
+        # per attempt; the overall time may be higher due to retries.
+        self._request_timeout = 600.0
+
+    async def _retrying_chat_completion(
+        self,
+        op_name: str,
+        **kwargs: Any,
+    ) -> ChatCompletion:
+        """Call chat.completions.create with retries and timeouts.
+
+        Transient OpenAI client errors such as timeouts are retried with
+        exponential backoff and jitter. After the configured number of
+        attempts, or on non-retryable errors, an :class:`InferenceError`
+        is raised.
+        """
+
+        async def _call() -> ChatCompletion:
+            return await self.client.chat.completions.create(
+                timeout=self._request_timeout,
+                **kwargs,
+            )
+
+        retrying = AsyncRetrying(
+            stop=stop_after_attempt(self._max_retries),
+            wait=wait_exponential_jitter(
+                exp_base=self._retry_base_delay,
+                max=self._retry_max_delay,
+            ),
+            retry=retry_if_exception_type(APITimeoutError),
+            reraise=True,
+        )
+
+        try:
+            async for attempt in retrying:
+                with attempt:
+                    return await _call()
+        except RetryError as exc:
+            last_exc = exc.last_attempt.exception()
+            logger.warning(
+                "%s giving up after %d retries: %r",
+                op_name,
+                self._max_retries,
+                last_exc,
+            )
+            raise InferenceError(f"{op_name} failed after retries") from last_exc
+        except OpenAIError as exc:
+            # Non-retryable client error: invalid request, auth, etc.
+            logger.exception("%s non-retryable OpenAIError", op_name)
+            raise InferenceError(f"{op_name} failed with non-retryable error") from exc
+
+        # This line is never reached at runtime but helps type checkers
+        # understand that the function does not fall through without a
+        # return or exception.
+        raise InferenceError(f"{op_name} failed without a response")
 
     async def generate_trace(
         self,
@@ -77,7 +148,8 @@ class InferenceClient:
             seed,
         )
 
-        response: ChatCompletion = await self.client.chat.completions.create(
+        response: ChatCompletion = await self._retrying_chat_completion(
+            "generate_trace",
             model=self.model,
             messages=messages,
             temperature=temperature,
@@ -145,7 +217,8 @@ class InferenceClient:
         # a bit to avoid truncation.
         max_tokens = max(len(reasoning) // 2 + 32, 64)
 
-        response: ChatCompletion = await self.client.chat.completions.create(
+        response: ChatCompletion = await self._retrying_chat_completion(
+            "score_label_given_trace",
             model=self.model,
             messages=context_messages,
             temperature=0.0,
