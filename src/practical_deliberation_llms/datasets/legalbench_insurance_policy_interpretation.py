@@ -21,8 +21,8 @@ class LegalBenchInsurancePolicyInterpretationAdapter(DatasetAdapter):
 
     For accepted rows the adapter drops the first and last paragraph and
     prepends a short generic instruction. Actions are never parsed from
-    the inputs; the adapter always uses the canonical Likert (default)
-    or a binary YES/NO set when `use_likert=False`.
+    the inputs; the adapter always uses the canonical ambiguity scale (default)
+    or a binary YES/NO set when `use_ambiguous=False`.
     """
 
     HF_DATASET_ID = "arcee-ai/legalbench_tasks"
@@ -32,16 +32,14 @@ class LegalBenchInsurancePolicyInterpretationAdapter(DatasetAdapter):
         "split": "test",
         # Interpret numeric answers as 0-based indices by default.
         "answer_numeric_base": 0,
-        # Whether to use Likert scale or binary choice.
-        "use_likert": True,
+        # Whether to use ambiguity scale or binary choice.
+        "use_ambiguous": True,
     }
 
-    CANONICAL_LIKERT = [
-        "Surely YES (claim covered)",
-        "Rather YES (claim rather covered)",
-        "Unclear (it's ambiguous)",
-        "Rather NO (claim rather not covered)",
-        "Surely NO (claim not covered)",
+    CANONICAL_AMBIGUOUS = [
+        "YES",
+        "NO",
+        "It's ambiguous",
     ]
 
     GENERIC_HEADER = (
@@ -93,10 +91,10 @@ class LegalBenchInsurancePolicyInterpretationAdapter(DatasetAdapter):
                     )
                     continue
 
-                use_likert = self.adapter_kwargs.get("use_likert", True)
+                use_ambiguous = self.adapter_kwargs.get("use_ambiguous", True)
 
-                if use_likert:
-                    actions = list(self.CANONICAL_LIKERT)
+                if use_ambiguous:
+                    actions = list(self.CANONICAL_AMBIGUOUS)
                 else:
                     actions = ["YES", "NO"]
 
@@ -122,20 +120,6 @@ class LegalBenchInsurancePolicyInterpretationAdapter(DatasetAdapter):
                 records.append(record)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.exception("Error normalizing row %s: %s", idx, exc)
-                metadata = {
-                    "source_dataset": "legalbench_insurance_policy_interpretation",
-                    "source_id": row.get("index") or row.get("id") or str(idx),
-                    "hf_dataset_id": self.HF_DATASET_ID,
-                    "parsing_error": str(exc),
-                }
-                records.append(
-                    {
-                        "decision_situation": str(row.get("inputs") or ""),
-                        "actions": list(self.CANONICAL_LIKERT),
-                        "metadata": metadata,
-                        "problem_uid": f"legalbench_insurance_policy_interpretation::{metadata['source_id']}",
-                    }
-                )
 
         norm_df = pd.DataFrame.from_records(records)
         return norm_df

@@ -317,11 +317,11 @@ def test_legalbench_corporate_lobbying_integration() -> None:
     """Integration checks for the legalbench corporate lobbying adapter.
 
     This test is stronger and more deterministic now that the adapter
-    consistently uses the `use_likert` kwarg.
+    consistently uses the `use_ambiguous` kwarg.
 
     - Verifies adapter registration and normalized DataFrame shape.
-    - Asserts canonical Likert actions in default mode.
-    - Asserts binary actions when `use_likert=False` is passed.
+    - Asserts canonical ambiguity scale in default mode.
+    - Asserts binary actions when `use_ambiguous=False` is passed.
     """
 
     assert "legalbench_corporate_lobbying" in ADAPTER_REGISTRY
@@ -348,7 +348,7 @@ def test_legalbench_corporate_lobbying_integration() -> None:
     assert isinstance(first["problem_uid"], str)
     assert first["problem_uid"].startswith("legalbench_corporate_lobbying::")
 
-    # End-to-end via sample_problems: default should produce the canonical Likert
+    # End-to-end via sample_problems: default should produce the canonical ambiguity scale
     n = 3
     problems = sample_problems(
         dataset_name="legalbench_corporate_lobbying",
@@ -360,16 +360,16 @@ def test_legalbench_corporate_lobbying_integration() -> None:
 
     for p in problems:
         _assert_problem_basic_shape(p)
-        # With the kwarg naming fixed, default mode must equal the canonical Likert
-        assert p.actions == LegalBenchCorporateLobbyingAdapter.CANONICAL_LIKERT
+        # With the kwarg naming fixed, default mode must equal the canonical AMBIGUITY scale
+        assert p.actions == LegalBenchCorporateLobbyingAdapter.CANONICAL_AMBIGUOUS
         assert p.source_dataset == "legalbench_corporate_lobbying"
 
-    # Binary mode: pass use_likert=False to obtain YES/NO actions
+    # Binary mode: pass use_ambiguous=False to obtain YES/NO actions
     problems_bin = sample_problems(
         dataset_name="legalbench_corporate_lobbying",
         n_problems=3,
         seed=1,
-        adapter_kwargs={"split": "test", "use_likert": False},
+        adapter_kwargs={"split": "test", "use_ambiguous": False},
     )
     assert len(problems_bin) == 3
     for p in problems_bin:

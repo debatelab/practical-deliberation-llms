@@ -1,5 +1,5 @@
-candidate_model: "mistralai/Devstral-Small-2-24B-Instruct-2512" # "kit.gpt-oss-120b"
-assistant_model: "mistralai/Devstral-Small-2-24B-Instruct-2512" # "kit.gpt-oss-120b"
+candidate_model: "HuggingFaceTB/SmolLM3-3B" # "kit.gpt-oss-120b"
+assistant_model: "HuggingFaceTB/SmolLM3-3B" # "kit.gpt-oss-120b"
 
 datasets:
   - name: "daily_dilemmas"

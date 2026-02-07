@@ -18,9 +18,7 @@ class LegalBenchCorporateLobbyingAdapter(DatasetAdapter):
     Mapping rules (summary):
     - `decision_situation` is derived from the `inputs` field by splitting off
       any question/prompt or options block.
-    - `actions` come from HF `multiple_choice_targets` when available and
-      non-empty, otherwise from choices parsed from `inputs`, otherwise a
-      canonical 5-point Likert: ["Strongly oppose", "Oppose", "Neutral", "Support", "Strongly support"].
+    - `actions`: ["YES", "NO"], and, possibly "It's ambiguous"].
     - Conservative GT handling: attempt to map `answer` to an index only when
       unambiguous. Otherwise store raw GT in metadata and set parsing flags.
     """
@@ -33,21 +31,19 @@ class LegalBenchCorporateLobbyingAdapter(DatasetAdapter):
         # Interpret numeric answers as 0-based indices by default. Can be
         # overridden via adapter_kwargs.
         "answer_numeric_base": 0,
-        # Whether to use Likert scale or binary choice.
-        "use_likert": True,
+        # Whether to ambiguity option, or binary choice.
+        "use_ambiguous": True,
     }
 
-    CANONICAL_LIKERT = [
-        "Surely YES",
-        "Rather YES",
-        "Unclear",
-        "Rather NO",
-        "Surely NO",
+    CANONICAL_AMBIGUOUS = [
+        "YES",
+        "NO",
+        "It's ambiguous",
     ]
 
     def load(self) -> pd.DataFrame:
         # Only pass HF-recognized arguments to `load_dataset` (e.g., name/config, split).
-        # Adapter-specific options (like answer_numeric_base, use_likert) should not be
+        # Adapter-specific options (like answer_numeric_base, use_ambiguous) should not be
         # forwarded to the datasets builder as they can cause builder config errors.
         hf_kwargs = {}
         for key in ("name", "split"):  # supported config args for this dataset
@@ -98,10 +94,10 @@ class LegalBenchCorporateLobbyingAdapter(DatasetAdapter):
                     logger.warning(f"Skipping row with idx {row.get('index')}")
                     continue
 
-                use_likert = self.adapter_kwargs.get("use_likert", True)
+                use_ambiguous = self.adapter_kwargs.get("use_ambiguous", True)
 
-                if use_likert:
-                    actions = list(self.CANONICAL_LIKERT)
+                if use_ambiguous:
+                    actions = list(self.CANONICAL_AMBIGUOUS)
                 else:
                     actions = [
                         "YES",
@@ -130,20 +126,6 @@ class LegalBenchCorporateLobbyingAdapter(DatasetAdapter):
                 records.append(record)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.exception("Error normalizing row %s: %s", idx, exc)
-                metadata = {
-                    "source_dataset": "legalbench_corporate_lobbying",
-                    "source_id": row.get("index") or row.get("id") or str(idx),
-                    "hf_dataset_id": self.HF_DATASET_ID,
-                    "parsing_error": str(exc),
-                }
-                records.append(
-                    {
-                        "decision_situation": str(row.get("inputs") or ""),
-                        "actions": list(self.CANONICAL_LIKERT),
-                        "metadata": metadata,
-                        "problem_uid": f"legalbench_corporate_lobbying::{metadata['source_id']}",
-                    }
-                )
 
         norm_df = pd.DataFrame.from_records(records)
         return norm_df

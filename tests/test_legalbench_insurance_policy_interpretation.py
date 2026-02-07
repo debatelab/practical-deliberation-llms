@@ -7,7 +7,7 @@ from practical_deliberation_llms.datasets.legalbench_insurance_policy_interpreta
 )
 
 
-def test_use_likert_default_trims_instruction_and_uses_likert():
+def test_use_ambiguous_default_trims_instruction_and_uses_ambiguous():
     df = pd.DataFrame(
         [
             {
@@ -32,12 +32,12 @@ def test_use_likert_default_trims_instruction_and_uses_likert():
     )
     assert (
         row["actions"]
-        == LegalBenchInsurancePolicyInterpretationAdapter.CANONICAL_LIKERT
+        == LegalBenchInsurancePolicyInterpretationAdapter.CANONICAL_AMBIGUOUS
     )
     assert row["metadata"]["gt_raw"] == "A"
 
 
-def test_use_likert_false_produces_binary_choice():
+def test_use_ambiguous_false_produces_binary_choice():
     df = pd.DataFrame(
         [
             {
@@ -50,7 +50,7 @@ def test_use_likert_false_produces_binary_choice():
 
     adapter = LegalBenchInsurancePolicyInterpretationAdapter(
         dataset_name="legalbench_insurance_policy_interpretation",
-        use_likert=False,
+        use_ambiguous=False,
     )
     out = adapter.normalize_dataframe(df)
 

@@ -61,6 +61,12 @@ and transformed variant, we compare the mean choice dispositions
 $\bar{Q}_\text{base}$ and $\bar{Q}_\text{trans}$ using KL divergence
 (`kl_divergence`).
 
+
+## Related Work
+
+* Wang, Xuezhi, Jason Wei, Dale Schuurmans, Quoc Le, Ed Chi, Sharan Narang, Aakanksha Chowdhery, and Denny Zhou. "Self-consistency improves chain of thought reasoning in language models." arXiv preprint arXiv:2203.11171 (2022).
+
+
 ## Experimental Design
 
 The main entry point is `run_experiment.py`, which orchestrates a complete
