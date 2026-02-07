@@ -38,7 +38,7 @@ Our working **deliberative competence assumption** is:
 > If an agent can competently deliberate about problem $P$, then i.i.d. samples
 > $r_1, \dots, r_n$ of its reasoning for $P$ should induce similar policies
 > $\pi_\theta(\cdot \mid S, C, r_j)$ over options (equivalently, similar
-> choice dispositions $Q_j(\cdot)$).
+> choice dispositions $Q_j(\cdot)$ ).
 
 Concretely, for each problem we:
 
