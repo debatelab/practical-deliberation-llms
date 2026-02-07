@@ -9,6 +9,7 @@ from practical_deliberation_llms.formats import LABEL_FIELD_NAME
 from practical_deliberation_llms.util import (
     LABEL_JSON_REGEX,
     LABEL_PREFIX_REGEX,
+    compute_jsd_information_radius,
     extract_label_from_json,
     kl_divergence,
     logprobs_to_label_probs,
@@ -158,12 +159,12 @@ def test_kl_divergence_handles_zeros_and_clipping():
     assert value > 20.0
 
 
-def test_within_context_disagreement_two_opposite_dists_equals_log2():
+def test_compute_jsd_information_radius_two_opposite_dists_equals_log2():
     # Two one-hot distributions on opposite categories
     d1 = np.array([1.0, 0.0])
     d2 = np.array([0.0, 1.0])
 
-    value = within_context_disagreement([d1, d2])
+    value = compute_jsd_information_radius([d1, d2])
 
     # Mean distribution is [0.5, 0.5], so each KL = log(2); average is log(2)
     expected = float(np.log(2.0))
@@ -172,15 +173,15 @@ def test_within_context_disagreement_two_opposite_dists_equals_log2():
     assert np.isclose(value, expected, rtol=1e-9, atol=1e-12)
 
 
-def test_within_context_disagreement_three_asymmetric_dists():
+def test_compute_jsd_information_radius_three_asymmetric_dists():
     d1 = np.array([1.0, 0.0, 0.0])
     d2 = np.array([0.2, 0.4, 0.4])
     d3 = np.array([0.0, 0.5, 0.5])
 
-    wcdis12 = within_context_disagreement([d1, d2])
-    wcdis23 = within_context_disagreement([d2, d3])
-    wcdis13 = within_context_disagreement([d1, d3])
-    wcdis123 = within_context_disagreement([d1, d2, d3])
+    wcdis12 = compute_jsd_information_radius([d1, d2])
+    wcdis23 = compute_jsd_information_radius([d2, d3])
+    wcdis13 = compute_jsd_information_radius([d1, d3])
+    wcdis123 = compute_jsd_information_radius([d1, d2, d3])
 
     assert wcdis12 < wcdis13, (
         "d2 is closer to d1 than d3 is, so disagreement for (d1, d2) "

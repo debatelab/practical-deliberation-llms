@@ -5,7 +5,7 @@ project and in the Colab notebook, including:
 
 - Converting token-level logprobs into label-level probabilities.
 - Parsing `<think>...</think>` fences and JSON label answers.
-- Computing KL divergence and within-context disagreement metrics.
+- Computing KL divergence and Jensen-Shannon information radius metrics.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import warnings
 from typing import Any, Dict, Iterable, List, Tuple
 
 import numpy as np
@@ -208,15 +209,16 @@ def kl_divergence(p: np.ndarray, q: np.ndarray, eps: float = 1e-12) -> float:
     return float(np.sum(p * np.log(p / q)))
 
 
-def within_context_disagreement(dists: List[np.ndarray]) -> float:
-    """Compute within-context disagreement ``D_within`` over distributions.
+def compute_jsd_information_radius(dists: List[np.ndarray]) -> float:
+    """Compute Jensen-Shannon information radius over distributions.
 
-    The metric is defined as::
+    This metric, ``jsd_information_radius``, is defined as::
 
-        D_within = (1/n) * sum_i KL(Q_i || Q_bar)
+        jsd_information_radius = (1/n) * sum_i KL(Q_i || Q_bar)
 
     where ``Q_i`` are the input distributions and ``Q_bar`` is their
-    mean distribution.
+    mean distribution. With equal weights over ``Q_i``, this equals the
+    generalized Jensen-Shannon divergence (information radius).
     """
 
     if not dists:
@@ -234,3 +236,14 @@ def within_context_disagreement(dists: List[np.ndarray]) -> float:
         total += kl_divergence(arr[i], q_bar)
 
     return float(total / n)
+
+
+def within_context_disagreement(dists: List[np.ndarray]) -> float:
+    """Deprecated alias for :func:`compute_jsd_information_radius`."""
+
+    warnings.warn(
+        "within_context_disagreement is deprecated; use compute_jsd_information_radius instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return compute_jsd_information_radius(dists)

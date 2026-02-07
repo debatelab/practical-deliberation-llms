@@ -3,8 +3,9 @@
 This module mirrors the analysis steps from the draft notebook:
 
 - Construct per-trace label distributions ``Q_i`` from score records.
-- Compute within-context disagreement ``D_within`` per problem using
-  ``util.within_context_disagreement``.
+- Compute within-context Jensen-Shannon information radius
+  ``jsd_information_radius`` per problem using
+  ``util.compute_jsd_information_radius``.
 - Compute KL divergence between baseline and transformed variants using
   ``util.kl_divergence``.
 """
@@ -17,7 +18,10 @@ from typing import Any, Dict, Iterable, List, Tuple
 import numpy as np
 import pandas as pd
 
-from practical_deliberation_llms.util import kl_divergence, within_context_disagreement
+from practical_deliberation_llms.util import (
+    kl_divergence,
+    compute_jsd_information_radius,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +59,7 @@ def compute_metrics(
     trace_records: Iterable[Dict[str, Any]] | pd.DataFrame,
     score_records: Iterable[Dict[str, Any]] | pd.DataFrame,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Compute within-context disagreement and baseline-vs-transform metrics.
+    """Compute within-context JSD information radius and baseline-vs-transform metrics.
 
     Parameters
     ----------
@@ -95,9 +99,9 @@ def compute_metrics(
     dist_df, label_cols = _scores_to_distributions(scores_df)
 
     # ------------------------------------------------------------------
-    # Within-context disagreement per problem_uid
+    # Within-context Jensen-Shannon information radius per problem_uid
     # ------------------------------------------------------------------
-    d_within_records: List[Dict[str, Any]] = []
+    jsd_records: List[Dict[str, Any]] = []
 
     for problem_uid, group in dist_df.groupby("problem_uid"):
         dists: List[np.ndarray] = []
@@ -107,7 +111,7 @@ def compute_metrics(
                 p_vec = p_vec / p_vec.sum()
             dists.append(p_vec)
 
-        d_within = within_context_disagreement(dists)
+        jsd_information_radius = compute_jsd_information_radius(dists)
         n_traces = len(dists)
 
         # Recover metadata from the first matching trace row if available.
@@ -117,7 +121,7 @@ def compute_metrics(
         record: Dict[str, Any] = {
             "problem_uid": problem_uid,
             "n_traces": n_traces,
-            "D_within": float(d_within),
+            "jsd_information_radius": float(jsd_information_radius),
         }
 
         if meta_row is not None:
@@ -130,11 +134,11 @@ def compute_metrics(
                 if col in trace_df.columns:
                     record[col] = meta_row.get(col)
 
-        d_within_records.append(record)
+        jsd_records.append(record)
 
-    d_within_df = pd.DataFrame(d_within_records)
+    d_within_df = pd.DataFrame(jsd_records)
 
-    logger.debug("compute_metrics d_within_rows=%d", len(d_within_df))
+    logger.debug("compute_metrics jsd_information_radius_rows=%d", len(d_within_df))
 
     # ------------------------------------------------------------------
     # Baseline vs transformed KL divergence per base_problem_uid
