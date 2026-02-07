@@ -15,14 +15,18 @@ class LegalBenchInsurancePolicyInterpretationAdapter(DatasetAdapter):
     """Adapter for the `arcee-ai/legalbench_tasks` dataset (config
     `insurance_policy_interpretation`).
 
-    This simplified adapter only accepts inputs that match the strict
-    three-or-more-paragraph template described in the project notes.
-    If a row does not match the expected template it is skipped.
+    This simplified adapter only accepts inputs that match a strict
+    instruction template. If a row does not match the expected template
+    it is skipped.
 
-    For accepted rows the adapter drops the first and last paragraph and
-    prepends a short generic instruction. Actions are never parsed from
-    the inputs; the adapter always uses the canonical ambiguity scale (default)
-    or a binary YES/NO set when `use_ambiguous=False`.
+    For accepted rows the adapter strips the leading and trailing
+    instructions, prepends a short generic header, and treats the
+    remaining text as the decision situation. Actions are never parsed
+    from the inputs; the adapter always uses the canonical ambiguity
+    scale (default) or a binary YES/NO set when ``use_ambiguous=False``.
+
+    The HF ``answer`` field is not mapped to action indices; it is
+    preserved verbatim in ``metadata["gt_raw"]``.
     """
 
     HF_DATASET_ID = "arcee-ai/legalbench_tasks"
@@ -30,8 +34,6 @@ class LegalBenchInsurancePolicyInterpretationAdapter(DatasetAdapter):
     DEFAULT_ADAPTER_KWARGS: Dict[str, Any] = {
         "name": "insurance_policy_interpretation",
         "split": "test",
-        # Interpret numeric answers as 0-based indices by default.
-        "answer_numeric_base": 0,
         # Whether to use ambiguity scale or binary choice.
         "use_ambiguous": True,
     }
@@ -99,7 +101,7 @@ class LegalBenchInsurancePolicyInterpretationAdapter(DatasetAdapter):
                     actions = ["YES", "NO"]
 
                 metadata: Dict[str, Any] = {
-                    "source_dataset": "legalbench_insurance_policy_interpretation",
+                    "source_dataset": self.dataset_name,
                     "source_id": source_id,
                     "hf_dataset_id": self.HF_DATASET_ID,
                     "hf_config": self.adapter_kwargs.get("name"),
@@ -125,35 +127,39 @@ class LegalBenchInsurancePolicyInterpretationAdapter(DatasetAdapter):
         return norm_df
 
     def parse_inputs(self, inputs: str) -> str | None:
-        """Parse only rows that match the strict template.
+        """Parse only rows that match the strict instruction template.
 
-        Expected form (paragraphs separated by blank lines):
-        - first paragraph starts with 'Read the insurance policy and the insurance claim.'
-        - middle paragraphs describe policy/claim (one or more paragraphs)
-        - last paragraph is an instruction like 'Answer by only outputting the letter A, B or C.'
+        We expect the text to start with a fixed instruction prefix and end
+        with a fixed instruction suffix. If either is missing, or if there
+        is no content between them, return ``None`` so the row will be
+        skipped.
 
-        If the input does not match this structure, return (None)
-        so the row will be skipped.
-
-        For matching rows return the cleaned decision_situation (generic header + middle
-        content), no instruction, and an empty parsed_actions list.
+        For matching rows, return the cleaned decision_situation (generic
+        header + middle content).
         """
 
         text = inputs.strip("\n ")
         if not text:
             return None
 
-        expected_prefix = "Read the insurance policy and the insurance claim. Answer whether the claim is covered under the policy with [A: Yes; B: No; C: It’s ambiguous]"
+        # NOTE: The apostrophe in "Its ambiguous" matches the HF dataset text
+        # and the existing tests; we intentionally keep this non-ASCII form
+        # here so that the strict template check passes.
+        expected_prefix = (
+            "Read the insurance policy and the insurance claim. "
+            "Answer whether the claim is covered under the policy with "
+            "[A: Yes; B: No; C: It’s ambiguous]"
+        )
         expected_suffix = "Answer by only outputting the letter A, B or C."
 
         if not text.startswith(expected_prefix):
             logger.warning(
-                f"Inputs '{text[:50]}...' does not start with {expected_prefix}"
+                "Inputs did not start with expected insurance prefix; skipping row."
             )
             return None
         if not text.endswith(expected_suffix):
             logger.warning(
-                f"Inputs '{text[:50]}...' does not end with {expected_suffix}"
+                "Inputs did not end with expected insurance suffix; skipping row."
             )
             return None
 

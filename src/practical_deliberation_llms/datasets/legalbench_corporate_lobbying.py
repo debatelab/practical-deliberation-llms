@@ -13,14 +13,15 @@ logger = logging.getLogger(__name__)
 
 
 class LegalBenchCorporateLobbyingAdapter(DatasetAdapter):
-    """Adapter for the `arcee-ai/legalbench_tasks` dataset (config `corporate_lobbying`).
+    """Adapter for the `arcee-ai/legalbench_tasks` dataset (config
+    `corporate_lobbying`).
 
     Mapping rules (summary):
-    - `decision_situation` is derived from the `inputs` field by splitting off
-      any question/prompt or options block.
-    - `actions`: ["YES", "NO"], and, possibly "It's ambiguous"].
-    - Conservative GT handling: attempt to map `answer` to an index only when
-      unambiguous. Otherwise store raw GT in metadata and set parsing flags.
+    - `decision_situation` is derived from the `inputs` field by stripping
+      off template-specific instructions.
+    - `actions`: ["YES", "NO"], and, optionally, "It's ambiguous".
+    - Ground truth handling: we do not map the HF `answer` to action
+      indices; instead we store the raw value in ``metadata["gt_raw"]``.
     """
 
     HF_DATASET_ID = "arcee-ai/legalbench_tasks"
@@ -28,10 +29,8 @@ class LegalBenchCorporateLobbyingAdapter(DatasetAdapter):
     DEFAULT_ADAPTER_KWARGS: Dict[str, Any] = {
         "name": "corporate_lobbying",
         "split": "test",
-        # Interpret numeric answers as 0-based indices by default. Can be
-        # overridden via adapter_kwargs.
-        "answer_numeric_base": 0,
-        # Whether to ambiguity option, or binary choice.
+        # Whether to include an explicit "It's ambiguous" option (default)
+        # or use a binary YES/NO choice.
         "use_ambiguous": True,
     }
 
@@ -43,8 +42,8 @@ class LegalBenchCorporateLobbyingAdapter(DatasetAdapter):
 
     def load(self) -> pd.DataFrame:
         # Only pass HF-recognized arguments to `load_dataset` (e.g., name/config, split).
-        # Adapter-specific options (like answer_numeric_base, use_ambiguous) should not be
-        # forwarded to the datasets builder as they can cause builder config errors.
+        # Adapter-specific options (like use_ambiguous) should not be forwarded to the
+        # datasets builder as they can cause builder config errors.
         hf_kwargs = {}
         for key in ("name", "split"):  # supported config args for this dataset
             if key in self.adapter_kwargs:
@@ -105,7 +104,7 @@ class LegalBenchCorporateLobbyingAdapter(DatasetAdapter):
                     ]
 
                 metadata: Dict[str, Any] = {
-                    "source_dataset": "legalbench_corporate_lobbying",
+                    "source_dataset": self.dataset_name,
                     "source_id": source_id,
                     "hf_dataset_id": self.HF_DATASET_ID,
                     "hf_config": self.adapter_kwargs.get("name"),
@@ -131,14 +130,20 @@ class LegalBenchCorporateLobbyingAdapter(DatasetAdapter):
         return norm_df
 
     def parse_inputs(self, inputs: str) -> str | None:
-        """Split `inputs` into (decision_situation, instruction, parsed_actions, parsing_flags).
+        """Parse HF ``inputs`` into a decision_situation string or ``None``.
 
-        Simplified parser per request:
-        1. Normalize newlines.
-        2. If the raw text contains the substring "\n " (newline + space), split at the first occurrence and keep the left part.
-        3. If the resulting text ends with the exact sentence
-           "Answer by only replying to Yes or No.", remove that sentence and trim again.
-        4. Return the remaining text as the decision_situation; no parsed actions or instruction.
+        The current parser is deliberately strict and only accepts inputs
+        that match a simple yes/no template used in the corporate lobbying
+        task. In particular it:
+
+        - Normalizes newlines and trims leading/trailing whitespace.
+        - Requires the text to end with the sentence
+          "Answer by only replying to Yes or No." and strips it.
+        - Strips the embedded instruction
+          " (by saying YES or NO; note the all-caps)" if present.
+
+        If the template is not matched, returns ``None`` so the row is
+        skipped during normalization.
         """
 
         text = inputs or ""
@@ -148,28 +153,28 @@ class LegalBenchCorporateLobbyingAdapter(DatasetAdapter):
         # Normalize newlines
         text = re.sub(r"\r\n?", "\n", text)
 
-        # Step 1: strip
+        # Strip leading/trailing whitespace
         text = text.strip("\n ")
 
-        # Step 2: detect and remove the trailing yes/no instruction line
+        # Detect and remove the trailing yes/no instruction line
         yes_no_sentence = "Answer by only replying to Yes or No."
         if text.endswith(yes_no_sentence):
             text = text[: -len(yes_no_sentence)].strip()
         else:
             logger.warning(
-                f"Inputs '{inputs[:50]}...{inputs[-50:]}' does not end with '{yes_no_sentence}'."
+                "Inputs did not end with expected yes/no sentence; skipping row."
             )
             return None
 
-        # Step 3: remove embedded instruction
+        # Remove embedded instruction if present
         yes_no_instruction = " (by saying YES or NO; note the all-caps)"
         if yes_no_instruction in text:
             text = text.replace(yes_no_instruction, "")
         else:
             logger.warning(
-                f"Inputs '{inputs[:50]}...' does not contain '{yes_no_instruction}'."
+                "Inputs did not contain expected embedded yes/no instruction; skipping row."
             )
-            text = None
+            return None
 
         # Use the remaining text as the decision situation
         return text
