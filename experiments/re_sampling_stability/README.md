@@ -26,9 +26,11 @@ probability that the deliberator ultimately selects option $c \in C$ after
 "thinking" along $r$.
 
 For convenience, we write
+
 $$
 Q_j(c_i) = \pi_\theta(c_i \mid S, C, r_j)
 $$
+
 for the choice disposition induced by the $j$-th sampled trace $r_j$.
 
 Our working **deliberative competence assumption** is:
