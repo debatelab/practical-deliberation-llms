@@ -1,0 +1,44 @@
+candidate_model: "HuggingFaceTB/SmolLM3-3B" # "kit.gpt-oss-120b"
+assistant_model: "HuggingFaceTB/SmolLM3-3B" # "kit.gpt-oss-120b"
+
+datasets:
+  - name: "daily_dilemmas"
+    n_problems: 150
+    adapter_kwargs: {}
+  - name: "MSMDilemmas"
+    n_problems: 150
+    adapter_kwargs:
+      framework: "default" # or "Schwartz" or "MFT"
+  - name: "AITA"
+    n_problems: 150
+    adapter_kwargs: {}
+  - name: "RoleConflictBench"
+    n_problems: 150
+    adapter_kwargs:
+      name: "default"
+      split: "train"
+  - name: AIRiskDilemmas
+    n_problems: 150
+    adapter_kwargs:
+      subset: model_eval
+      split: test
+  - name: legalbench_corporate_lobbying
+    n_problems: 150
+    adapter_kwargs: {}
+  - name: legalbench_insurance_policy_interpretation
+    n_problems: 150
+    adapter_kwargs: {}
+
+n_traces_per_problem: 8
+temperature: 0.7
+top_p: 0.95
+seed: 1234
+
+max_transformations_per_problem: 0
+
+output_dir: "experiments/re_sampling_stability/outputs/smollm3_all_dev0"
+make_plots: true
+
+transform_problems_fn: ""
+generate_reasoning_trace_fn: "experiments.re_sampling_stability.reasoning.generate_reasoning_traces_for_problem"
+score_choice_labels_fn: "experiments.re_sampling_stability.judgment.score_choice_labels_for_trace"
