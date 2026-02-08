@@ -132,6 +132,6 @@ A typical run produces the following files under the configured `output_dir`:
 These artifacts are the primary inputs for downstream analysis in notebooks
 and papers.
 
-Example plot:
+Example plot (All-Things-Considered Judgment Stability of `HuggingFaceTB/SmolLM3-3B`):
 
 ![All Things Considered Judgment Stability of SmolLM3](../../assets/plots/re_sampling-jsd_information_radius_boxplot.png)
