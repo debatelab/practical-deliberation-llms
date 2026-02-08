@@ -134,4 +134,4 @@ and papers.
 
 Example plot:
 
-![All Things Considered Judgment Stability of SmolLM3](../assets/plots/re_sampling-jsd_information_radius_boxplot.png)
+![All Things Considered Judgment Stability of SmolLM3](../../assets/plots/re_sampling-jsd_information_radius_boxplot.png)
