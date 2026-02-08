@@ -18,7 +18,7 @@ We model a decision problem as a pair $P = \langle S, C \rangle$, where
 We fix a stochastic **deliberator** (e.g. an LLM with sampling enabled) with
 parameters $\theta$. For a given problem $(S, C)$, repeated calls to this
 deliberator with the same input and non-zero temperature yield different
-reasoning traces $r$ (we treat these as i.i.d. samples of internal reasoning).
+reasoning traces $r$ (we treat these as i.i.d. sampled deliberations).
 
 Given a particular trace $r$, we view the deliberator as inducing a stochastic
 **policy** over options, denoted $\pi_\theta(c \mid S, C, r)$, which gives the
