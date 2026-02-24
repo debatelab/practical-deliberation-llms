@@ -15,7 +15,7 @@ We model a decision problem as a pair $P = \langle S, C \rangle$, where
 - $S$ is a natural-language description of a situation, and
 - $C = \{c_1, \dots, c_k\}$ is a finite set of options.
 
-We fix a stochastic **deliberator** (e.g. an LLM with sampling enabled) with
+We consider a stochastic **deliberator** (e.g. an LLM with sampling enabled) with
 parameters $\theta$. For a given problem $(S, C)$, repeated calls to this
 deliberator with the same input and non-zero temperature yield different
 reasoning traces $r$ (we treat these as i.i.d. sampled deliberations).
