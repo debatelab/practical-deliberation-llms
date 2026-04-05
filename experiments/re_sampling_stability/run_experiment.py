@@ -434,10 +434,13 @@ async def run_experiment_async(
     # 4. Score choice labels (pluggable, async, per-trace)
     # ------------------------------------------------------------------
     score_records: List[dict] = []
-
-    _notify_progress("scoring", 0, 1)
+    total_traces = len(trace_records)
+    scoring_completed = 0
+    if total_traces:
+        _notify_progress("scoring", 0, total_traces)
 
     async def _score_single_trace(idx: int, trace: dict) -> List[dict]:
+        nonlocal scoring_completed
         if idx % 50 == 0:
             logger.debug("Scoring labels for trace %d / %d", idx, len(trace_records))
 
@@ -456,7 +459,7 @@ async def run_experiment_async(
                     trace.get("problem_uid"),
                     exc,
                 )
-                return []
+                scores_for_trace = []
             except Exception:  # pragma: no cover - defensive logging, re-raise
                 logger.exception(
                     "Scoring failed for trace_idx=%d trace_id=%s problem_uid=%s",
@@ -471,6 +474,10 @@ async def run_experiment_async(
                 "score_choice_labels_fn must return a non-None sequence; "
                 "got None instead"
             )
+
+        scoring_completed += 1
+        if total_traces:
+            _notify_progress("scoring", scoring_completed, total_traces)
 
         return list(scores_for_trace)
 
@@ -490,8 +497,6 @@ async def run_experiment_async(
         )
 
     logger.info("Computed %d label scores", len(score_records))
-
-    _notify_progress("scoring", 1, 1)
 
     # ------------------------------------------------------------------
     # 5. Convert to DataFrames and run fixed analysis / plotting / saving
