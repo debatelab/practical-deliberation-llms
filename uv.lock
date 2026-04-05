@@ -2046,18 +2046,23 @@ name = "practical-deliberation-llms"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "arize-phoenix" },
     { name = "chz" },
     { name = "datasets" },
+    { name = "openai" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "seaborn" },
+    { name = "tenacity" },
+]
+
+[package.optional-dependencies]
+legacy = [
+    { name = "arize-phoenix" },
     { name = "langchain" },
     { name = "langchain-community" },
     { name = "langchain-openai" },
     { name = "loguru" },
-    { name = "openai" },
     { name = "openinference-instrumentation-langchain" },
-    { name = "pyyaml" },
-    { name = "seaborn" },
-    { name = "tenacity" },
 ]
 
 [package.dev-dependencies]
@@ -2070,19 +2075,21 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arize-phoenix", specifier = ">=7.7.2" },
+    { name = "arize-phoenix", marker = "extra == 'legacy'", specifier = ">=7.7.2" },
     { name = "chz", specifier = ">=0.4.0" },
     { name = "datasets", specifier = ">=3.2.0" },
-    { name = "langchain", specifier = ">=0.3,<0.4" },
-    { name = "langchain-community", specifier = ">=0.3" },
-    { name = "langchain-openai", specifier = ">=0.2,<0.3" },
-    { name = "loguru", specifier = ">=0.7.3" },
+    { name = "langchain", marker = "extra == 'legacy'", specifier = ">=0.3,<0.4" },
+    { name = "langchain-community", marker = "extra == 'legacy'", specifier = ">=0.3" },
+    { name = "langchain-openai", marker = "extra == 'legacy'", specifier = ">=0.2,<0.3" },
+    { name = "loguru", marker = "extra == 'legacy'", specifier = ">=0.7.3" },
     { name = "openai", specifier = ">=1.59.7" },
-    { name = "openinference-instrumentation-langchain", specifier = ">=0.1.29" },
+    { name = "openinference-instrumentation-langchain", marker = "extra == 'legacy'", specifier = ">=0.1.29" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "tenacity", specifier = ">=9.0.0" },
 ]
+provides-extras = ["legacy"]
 
 [package.metadata.requires-dev]
 dev = [

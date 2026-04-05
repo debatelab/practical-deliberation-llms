@@ -118,6 +118,15 @@ ScoreRecord dataclass.
 """
 
 
+ProgressCallback = Callable[[str, int, int], None]
+"""Callback for reporting progress updates.
+
+The callback receives a stage name (e.g. "load_problems", "reasoning"),
+the number of completed units for that stage, and the total number of
+units expected for that stage.
+"""
+
+
 # ---------------------------------------------------------------------------
 # Utility helpers
 # ---------------------------------------------------------------------------
@@ -198,6 +207,7 @@ async def run_experiment_async(
     transform_problems_fn: Optional[TransformProblemsFn],
     generate_reasoning_trace_fn: GenerateReasoningTraceFn,
     score_choice_labels_fn: ScoreChoiceLabelsFn,
+    progress_cb: Optional[ProgressCallback] = None,
 ) -> None:
     """Run a single experiment end-to-end.
 
@@ -211,6 +221,19 @@ async def run_experiment_async(
     """
 
     logger.info("Experiment configuration: %s", chz.asdict(config))
+
+    def _notify_progress(stage: str, completed: int, total: int) -> None:
+        """Invoke the progress callback if provided.
+
+        Errors are logged but do not abort the experiment run.
+        """
+
+        if progress_cb is None:
+            return
+        try:
+            progress_cb(stage, completed, total)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Progress callback failed; ignoring progress update.")
 
     # Ensure output directory is fresh so we do not overwrite existing results.
     ensure_fresh_output_dir(config.output_dir)
@@ -244,6 +267,8 @@ async def run_experiment_async(
     # ------------------------------------------------------------------
     base_problems: List[Any] = []
 
+    _notify_progress("load_problems", 0, 1)
+
     for ds_idx, ds_spec in enumerate(config.datasets):
         effective_seed = int(config.seed) + ds_idx
 
@@ -275,6 +300,8 @@ async def run_experiment_async(
         len(config.datasets),
     )
 
+    _notify_progress("load_problems", 1, 1)
+
     # ------------------------------------------------------------------
     # 2. Apply transformations (optional, pluggable, async, per-problem)
     # ------------------------------------------------------------------
@@ -288,6 +315,7 @@ async def run_experiment_async(
         logger.info("No transform_problems_fn configured; skipping transformations.")
         all_problems.extend(base_problems)
     else:
+        _notify_progress("transform_problems", 0, 1)
         # NOTE: For now we apply transformations sequentially per problem to
         # keep the control flow simple and avoid concurrency issues while we
         # iterate on the design. Once the default implementations are stable,
@@ -318,17 +346,27 @@ async def run_experiment_async(
             # transformer's responsibility and document the contract).
             all_problems.extend(transformed_seq)
 
+        _notify_progress("transform_problems", 1, 1)
+
     if not all_problems:
         logger.warning("No problems after transformations; nothing to run.")
 
     logger.info("Total problems after transformations: %d", len(all_problems))
+
+    total_problems = len(all_problems)
+    if total_problems:
+        _notify_progress("reasoning", 0, total_problems)
 
     # ------------------------------------------------------------------
     # 3. Generate reasoning traces (pluggable, async, per-problem)
     # ------------------------------------------------------------------
     trace_records: List[dict] = []
 
+    reasoning_completed = 0
+
     async def _reason_for_problem(idx: int, problem: Any) -> List[dict]:
+        nonlocal reasoning_completed
+
         if idx % 10 == 0:
             logger.debug(
                 "Generating traces for problem %d / %d", idx, len(all_problems)
@@ -348,7 +386,7 @@ async def run_experiment_async(
                     getattr(problem, "problem_uid", None),
                     exc,
                 )
-                return []
+                traces_for_problem = []
             except Exception:  # pragma: no cover - defensive logging, re-raise
                 logger.exception(
                     "Reasoning failed for problem_idx=%d problem_uid=%s",
@@ -365,6 +403,10 @@ async def run_experiment_async(
 
         # NOTE: We intentionally coerce to list here to avoid surprises if the
         # pluggable returns a non-list sequence.
+        reasoning_completed += 1
+        if total_problems:
+            _notify_progress("reasoning", reasoning_completed, total_problems)
+
         return list(traces_for_problem)
 
     if all_problems:
@@ -392,6 +434,8 @@ async def run_experiment_async(
     # 4. Score choice labels (pluggable, async, per-trace)
     # ------------------------------------------------------------------
     score_records: List[dict] = []
+
+    _notify_progress("scoring", 0, 1)
 
     async def _score_single_trace(idx: int, trace: dict) -> List[dict]:
         if idx % 50 == 0:
@@ -447,6 +491,8 @@ async def run_experiment_async(
 
     logger.info("Computed %d label scores", len(score_records))
 
+    _notify_progress("scoring", 1, 1)
+
     # ------------------------------------------------------------------
     # 5. Convert to DataFrames and run fixed analysis / plotting / saving
     # ------------------------------------------------------------------
@@ -482,6 +528,8 @@ async def run_experiment_async(
         len(d_within_df) if d_within_df is not None else 0,
         len(baseline_vs_trans_df) if baseline_vs_trans_df is not None else 0,
     )
+
+    _notify_progress("finalize", 1, 1)
 
 
 def main_chz(cli_cfg: CLIConfig) -> None:
