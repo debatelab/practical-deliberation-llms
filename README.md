@@ -18,7 +18,7 @@ We conceive of this as
 3. 🧪 a preliminary experimental setup, which is meant to be adapted and extended for further research on practical deliberation in LLMs.
 
 
-### Early Findings
+### Early Findings (**v0.0.1**)
 
 We've conducted simple experiments with [Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct) and found its all-things-considered judgments to be robust against various invariance transformations:
 
@@ -29,20 +29,9 @@ We've conducted simple experiments with [Llama-3.1-8B-Instruct](https://huggingf
 ![](./assets/plots/scatter_experiment_e4.png)
 
 
-### Requirements
+### CoT-Resampling Stability (**active development & current focus**)
 
-- `uv` (https://docs.astral.sh/uv/guides/install-python/)
-- `hatch` (https://hatch.pypa.io/latest/install/)
-
-### Get started
-
-```bash
-git clone https://github.com/debatelab/practical-deliberation-llms.git
-cd practical-deliberation-llms
-uv venv  # create virtual environment
-```
-
-[Connect](https://code.visualstudio.com/docs/datascience/jupyter-notebooks#_create-or-open-a-jupyter-notebook) notebook [`notebooks/proof_of_concept.ipynb`](notebooks/proof_of_concept.ipynb) to python `.venv`.
+- [README](experiments/re_sampling_stability/README.md)
 
 ### How to cite
 
